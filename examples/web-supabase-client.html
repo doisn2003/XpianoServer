@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xpiano - Web với Supabase</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    
+    /* Header */
+    .header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header h1 { color: #333; }
+    .user-info { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+    
+    /* Auth Section */
+    .auth-section { background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; }
+    .auth-form { display: flex; flex-direction: column; gap: 15px; max-width: 400px; }
+    .auth-form input { padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+    .auth-form button { padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    .auth-form button:hover { background: #45a049; }
+    .logout-btn { padding: 8px 16px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    
+    /* Pianos Grid */
+    .pianos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+    .piano-card { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: transform 0.2s; }
+    .piano-card:hover { transform: translateY(-4px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .piano-image { width: 100%; height: 200px; object-fit: cover; }
+    .piano-content { padding: 20px; }
+    .piano-name { font-size: 18px; font-weight: bold; color: #333; margin-bottom: 8px; }
+    .piano-category { display: inline-block; padding: 4px 12px; background: #e3f2fd; color: #1976d2; border-radius: 12px; font-size: 12px; margin-bottom: 8px; }
+    .piano-price { font-size: 20px; color: #4CAF50; font-weight: bold; margin: 10px 0; }
+    .piano-rating { color: #ff9800; }
+    .piano-description { color: #666; font-size: 14px; line-height: 1.6; }
+    
+    .hidden { display: none; }
+    .loading { text-align: center; padding: 40px; color: #666; }
+    .error { background: #ffebee; color: #c62828; padding: 12px; border-radius: 4px; margin-bottom: 16px; }
+    .success { background: #e8f5e9; color: #2e7d32; padding: 12px; border-radius: 4px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>🎹 Xpiano - Web với Supabase</h1>
+      <div class="user-info">
+        <div id="userDisplay"></div>
+        <button id="logoutBtn" class="logout-btn hidden" onclick="handleLogout()">Đăng xuất</button>
+      </div>
+    </div>
+
+    <!-- Auth Section (Hidden when logged in) -->
+    <div id="authSection" class="auth-section">
+      <h2>Đăng nhập / Đăng ký</h2>
+      <div id="authMessage"></div>
+      
+      <div class="auth-form">
+        <input type="email" id="email" placeholder="Email" required>
+        <input type="password" id="password" placeholder="Mật khẩu (tối thiểu 6 ký tự)" required>
+        <input type="text" id="fullName" placeholder="Họ tên (cho đăng ký)">
+        <button onclick="handleLogin()">Đăng nhập</button>
+        <button onclick="handleRegister()" style="background: #2196F3;">Đăng ký</button>
+      </div>
+    </div>
+
+    <!-- Pianos Section -->
+    <div id="pianosSection">
+      <h2 style="margin-bottom: 20px;">Danh sách đàn Piano</h2>
+      <div id="pianosGrid" class="pianos-grid"></div>
+      <div id="loadingPianos" class="loading">Đang tải...</div>
+    </div>
+  </div>
+
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <script>
+    // Initialize Supabase
+    const SUPABASE_URL = 'https://pjgjusdmzxrhgiptfvbg.supabase.co'
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBqZ2p1c2RtenhyaGdpcHRmdmJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg5MDk4NjUsImV4cCI6MjA1NDQ4NTg2NX0.YOUR_ACTUAL_KEY' // TODO: Replace with actual key
+    
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+    let currentUser = null
+
+    // Check auth state on load
+    async function initAuth() {
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (session) {
+        currentUser = session.user
+        updateUIForLoggedInUser()
+      }
+      
+      // Listen for auth changes
+      supabase.auth.onAuthStateChange((event, session) => {
+        if (session) {
+          currentUser = session.user
+          updateUIForLoggedInUser()
+        } else {
+          currentUser = null
+          updateUIForLoggedOutUser()
+        }
+      })
+    }
+
+    // Update UI when logged in
+    function updateUIForLoggedInUser() {
+      document.getElementById('authSection').classList.add('hidden')
+      document.getElementById('logoutBtn').classList.remove('hidden')
+      document.getElementById('userDisplay').innerHTML = `
+        <span>👤 ${currentUser.email}</span>
+        <small style="color: #666; margin-left: 10px;">
+          Role: ${currentUser.user_metadata?.role || 'user'}
+        </small>
+      `
+      loadPianos()
+    }
+
+    // Update UI when logged out
+    function updateUIForLoggedOutUser() {
+      document.getElementById('authSection').classList.remove('hidden')
+      document.getElementById('logoutBtn').classList.add('hidden')
+      document.getElementById('userDisplay').innerHTML = '<span style="color: #999;">Chưa đăng nhập</span>'
+      loadPianos() // Can still view pianos when logged out (if RLS allows)
+    }
+
+    // Register
+    async function handleRegister() {
+      const email = document.getElementById('email').value
+      const password = document.getElementById('password').value
+      const fullName = document.getElementById('fullName').value
+
+      if (!email || !password || !fullName) {
+        showMessage('Vui lòng điền đầy đủ thông tin', 'error')
+        return
+      }
+
+      if (password.length < 6) {
+        showMessage('Mật khẩu phải có ít nhất 6 ký tự', 'error')
+        return
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          data: {
+            full_name: fullName,
+            role: 'user'
+          }
+        }
+      })
+
+      if (error) {
+        showMessage('Lỗi đăng ký: ' + error.message, 'error')
+      } else {
+        showMessage('Đăng ký thành công! Vui lòng đăng nhập.', 'success')
+        document.getElementById('fullName').value = ''
+        document.getElementById('password').value = ''
+      }
+    }
+
+    // Login
+    async function handleLogin() {
+      const email = document.getElementById('email').value
+      const password = document.getElementById('password').value
+
+      if (!email || !password) {
+        showMessage('Vui lòng nhập email và mật khẩu', 'error')
+        return
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password
+      })
+
+      if (error) {
+        showMessage('Lỗi đăng nhập: ' + error.message, 'error')
+      } else {
+        showMessage('Đăng nhập thành công!', 'success')
+        document.getElementById('email').value = ''
+        document.getElementById('password').value = ''
+      }
+    }
+
+    // Logout
+    async function handleLogout() {
+      const { error } = await supabase.auth.signOut()
+      if (!error) {
+        showMessage('Đã đăng xuất', 'success')
+      }
+    }
+
+    // Load pianos
+    async function loadPianos() {
+      document.getElementById('loadingPianos').style.display = 'block'
+      document.getElementById('pianosGrid').innerHTML = ''
+
+      const { data: pianos, error } = await supabase
+        .from('pianos')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      document.getElementById('loadingPianos').style.display = 'none'
+
+      if (error) {
+        document.getElementById('pianosGrid').innerHTML = 
+          `<p style="color: red;">Lỗi: ${error.message}</p>`
+        return
+      }
+
+      if (!pianos || pianos.length === 0) {
+        document.getElementById('pianosGrid').innerHTML = 
+          '<p style="text-align: center; color: #666;">Chưa có đàn piano nào</p>'
+        return
+      }
+
+      pianos.forEach(piano => {
+        const card = document.createElement('div')
+        card.className = 'piano-card'
+        card.innerHTML = `
+          <img src="${piano.image_url || 'https://via.placeholder.com/300x200'}" 
+               alt="${piano.name}" 
+               class="piano-image"
+               onerror="this.src='https://via.placeholder.com/300x200?text=Piano'">
+          <div class="piano-content">
+            <div class="piano-name">${piano.name}</div>
+            <span class="piano-category">${piano.category}</span>
+            <div class="piano-price">${formatPrice(piano.price_per_hour)}</div>
+            <div class="piano-rating">⭐ ${piano.rating} (${piano.reviews_count} reviews)</div>
+            <p class="piano-description">${piano.description || ''}</p>
+            ${piano.features && piano.features.length > 0 ? `
+              <div style="margin-top: 10px;">
+                ${piano.features.map(f => `<span style="font-size: 12px; background: #f5f5f5; padding: 4px 8px; border-radius: 4px; margin-right: 4px; display: inline-block; margin-top: 4px;">✓ ${f}</span>`).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `
+        document.getElementById('pianosGrid').appendChild(card)
+      })
+    }
+
+    // Helpers
+    function formatPrice(price) {
+      return new Intl.NumberFormat('vi-VN', { 
+        style: 'currency', 
+        currency: 'VND' 
+      }).format(price)
+    }
+
+    function showMessage(message, type) {
+      const messageDiv = document.getElementById('authMessage')
+      messageDiv.className = type
+      messageDiv.textContent = message
+      setTimeout(() => {
+        messageDiv.className = ''
+        messageDiv.textContent = ''
+      }, 5000)
+    }
+
+    // Initialize on load
+    initAuth()
+  </script>
+</body>
+</html>

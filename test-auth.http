@@ -1,0 +1,173 @@
+### Xpiano Auth API Tests
+
+@baseUrl = http://localhost:3000/api
+@token = 
+@adminToken = 
+@teacherToken = 
+
+### ========================================
+### AUTH ENDPOINTS - Public
+### ========================================
+
+### 1. Register new user
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "newuser@test.com",
+  "password": "password123",
+  "full_name": "Nguyễn Văn A",
+  "phone": "0912345678",
+  "role": "user"
+}
+
+### 2. Register new teacher
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "newteacher@test.com",
+  "password": "password123",
+  "full_name": "Trần Thị B",
+  "phone": "0923456789",
+  "role": "teacher"
+}
+
+### 3. Login as Admin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@xpiano.com",
+  "password": "admin123"
+}
+
+### 4. Login as Teacher
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "teacher@xpiano.com",
+  "password": "teacher123"
+}
+
+### 5. Login as User
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@xpiano.com",
+  "password": "user123"
+}
+
+### 6. Forgot Password
+POST {{baseUrl}}/auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "user@xpiano.com"
+}
+
+### 7. Reset Password (use token from forgot password response)
+POST {{baseUrl}}/auth/reset-password
+Content-Type: application/json
+
+{
+  "token": "your-reset-token-here",
+  "new_password": "newpassword123"
+}
+
+### ========================================
+### AUTH ENDPOINTS - Protected
+### ========================================
+
+### 8. Get Current User Profile
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{token}}
+
+### 9. Update Profile
+PUT {{baseUrl}}/auth/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "full_name": "Nguyễn Văn Updated",
+  "phone": "0999888777"
+}
+
+### 10. Change Password
+PUT {{baseUrl}}/auth/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "current_password": "user123",
+  "new_password": "newuser123"
+}
+
+### 11. Logout
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{token}}
+
+### ========================================
+### USER MANAGEMENT - Admin Only
+### ========================================
+
+### 12. Get All Users (Admin)
+GET {{baseUrl}}/users
+Authorization: Bearer {{adminToken}}
+
+### 13. Get Users by Role
+GET {{baseUrl}}/users?role=teacher
+Authorization: Bearer {{adminToken}}
+
+### 14. Get User by ID
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{adminToken}}
+
+### 15. Create User (Admin)
+POST {{baseUrl}}/users
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "email": "admincreatedd@test.com",
+  "password": "password123",
+  "full_name": "Admin Created User",
+  "phone": "0888777666",
+  "role": "teacher"
+}
+
+### 16. Update User (Admin)
+PUT {{baseUrl}}/users/4
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "full_name": "Updated Name",
+  "role": "teacher",
+  "is_verified": true
+}
+
+### 17. Delete User (Admin)
+DELETE {{baseUrl}}/users/5
+Authorization: Bearer {{adminToken}}
+
+### 18. Get User Statistics (Admin)
+GET {{baseUrl}}/users/stats
+Authorization: Bearer {{adminToken}}
+
+### ========================================
+### AUTHORIZATION TESTS
+### ========================================
+
+### 19. Try to access admin endpoint as regular user (Should fail)
+GET {{baseUrl}}/users
+Authorization: Bearer {{token}}
+
+### 20. Try to access protected endpoint without token (Should fail)
+GET {{baseUrl}}/auth/me
+
+### 21. Try with invalid token (Should fail)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer invalid-token-here
