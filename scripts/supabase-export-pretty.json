@@ -1,0 +1,222 @@
+{
+    "exported_at": "2026-02-07T14:47:42.850Z",
+    "supabase_url": "https://pjgjusdmzxrhgiptfvbg.supabase.co",
+    "tables": {
+        "profiles": {
+            "error": "Could not find the table 'public.profiles' in the schema cache",
+            "count": 0,
+            "data": []
+        },
+        "pianos": {
+            "count": 12,
+            "data": [
+                {
+                    "id": 14,
+                    "created_at": "2026-02-07T08:27:32.23747+00:00",
+                    "name": "Casio Privia PX-S3100",
+                    "image_url": "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?q=80&w=1000",
+                    "category": "Digital",
+                    "price_per_hour": 90000,
+                    "rating": 4.4,
+                    "reviews_count": 76,
+                    "description": "Đàn piano điện tử siêu mỏng, phù hợp cho người mới bắt đầu và không gian nhỏ.",
+                    "features": [
+                        "Thiết kế siêu mỏng",
+                        "88 phím Smart Scaled",
+                        "Loa tích hợp",
+                        "USB Audio/MIDI",
+                        "Giá cả phải chăng"
+                    ]
+                },
+                {
+                    "id": 13,
+                    "created_at": "2026-02-07T08:27:32.188982+00:00",
+                    "name": "Yamaha U1 Upright",
+                    "image_url": "https://images.unsplash.com/photo-1564186763535-ebb21ef5277f?q=80&w=1000",
+                    "category": "Upright",
+                    "price_per_hour": 200000,
+                    "rating": 4.8,
+                    "reviews_count": 187,
+                    "description": "Mẫu đàn upright kinh điển, bền bỉ và âm thanh ổn định qua thời gian.",
+                    "features": [
+                        "Chiều cao 121cm",
+                        "Độ bền cao",
+                        "Bảo trì dễ dàng",
+                        "Giá trị lâu dài"
+                    ]
+                },
+                {
+                    "id": 12,
+                    "created_at": "2026-02-07T08:27:32.142549+00:00",
+                    "name": "Roland FP-90X Digital",
+                    "image_url": "https://images.unsplash.com/photo-1563861826100-9cb868fdbe1c?q=80&w=1000",
+                    "category": "Digital",
+                    "price_per_hour": 120000,
+                    "rating": 4.6,
+                    "reviews_count": 98,
+                    "description": "Đàn piano điện tử cao cấp với công nghệ mô phỏng âm thanh tiên tiến.",
+                    "features": [
+                        "88 phím PHA-50",
+                        "Bluetooth Audio/MIDI",
+                        "SuperNATURAL Piano",
+                        "Portable"
+                    ]
+                },
+                {
+                    "id": 11,
+                    "created_at": "2026-02-07T08:27:32.095958+00:00",
+                    "name": "Kawai K-300 Upright",
+                    "image_url": "https://images.unsplash.com/photo-1510915228340-29c85a43dcfe?q=80&w=1000",
+                    "category": "Upright",
+                    "price_per_hour": 180000,
+                    "rating": 4.7,
+                    "reviews_count": 142,
+                    "description": "Đàn piano đứng Nhật Bản chất lượng cao, phù hợp cho gia đình và học viên.",
+                    "features": [
+                        "Chiều cao 122cm",
+                        "Millennium III Action",
+                        "Âm thanh rõ ràng",
+                        "Tiết kiệm không gian"
+                    ]
+                },
+                {
+                    "id": 10,
+                    "created_at": "2026-02-07T08:27:32.045025+00:00",
+                    "name": "Steinway Model D Concert Grand",
+                    "image_url": "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?q=80&w=1000",
+                    "category": "Grand",
+                    "price_per_hour": 500000,
+                    "rating": 5,
+                    "reviews_count": 256,
+                    "description": "Đàn piano concert grand đẳng cấp thế giới, được sử dụng trong các buổi hòa nhạc chuyên nghiệp.",
+                    "features": [
+                        "Concert Grand 274cm",
+                        "Âm thanh đỉnh cao",
+                        "Handcrafted in Germany",
+                        "Phòng thu chuyên nghiệp"
+                    ]
+                },
+                {
+                    "id": 9,
+                    "created_at": "2026-02-07T08:25:54.654122+00:00",
+                    "name": "Test Piano",
+                    "image_url": "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0",
+                    "category": "Digital",
+                    "price_per_hour": 150000,
+                    "rating": 4.5,
+                    "reviews_count": 10,
+                    "description": "Test description",
+                    "features": [
+                        "Feature 1",
+                        "Feature 2"
+                    ]
+                },
+                {
+                    "id": 6,
+                    "created_at": "2026-02-07T08:22:37.815947+00:00",
+                    "name": "Yamaha C3X Grand",
+                    "image_url": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Grand",
+                    "price_per_hour": 250000,
+                    "rating": 4.9,
+                    "reviews_count": 128,
+                    "description": "Dòng đàn Grand Piano tiêu chuẩn thế giới cho âm thanh vang, sáng và cảm giác phím tuyệt vời.",
+                    "features": [
+                        "Âm thanh vòm",
+                        "Phím ngà voi nhân tạo",
+                        "Phòng cách âm VIP"
+                    ]
+                },
+                {
+                    "id": 1,
+                    "created_at": "2026-02-07T08:13:22.77281+00:00",
+                    "name": "Yamaha C3X Grand",
+                    "image_url": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Grand",
+                    "price_per_hour": 250000,
+                    "rating": 4.9,
+                    "reviews_count": 128,
+                    "description": "Dòng đàn Grand Piano tiêu chuẩn thế giới cho âm thanh vang, sáng và cảm giác phím tuyệt vời.",
+                    "features": [
+                        "Âm thanh vòm",
+                        "Phím ngà voi nhân tạo",
+                        "Phòng cách âm VIP"
+                    ]
+                },
+                {
+                    "id": 2,
+                    "created_at": "2026-02-07T08:13:22.77281+00:00",
+                    "name": "Kawai K-300 Upright",
+                    "image_url": "https://images.unsplash.com/photo-1552422535-c45813c61732?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Upright",
+                    "price_per_hour": 150000,
+                    "rating": 4.7,
+                    "reviews_count": 85,
+                    "description": "Lựa chọn hoàn hảo cho việc luyện tập hàng ngày với âm bass trầm ấm đặc trưng của Kawai.",
+                    "features": [
+                        "Touch phím đầm",
+                        "Giá nhạc rộng",
+                        "View cửa sổ"
+                    ]
+                },
+                {
+                    "id": 5,
+                    "created_at": "2026-02-07T08:13:22.77281+00:00",
+                    "name": "Yamaha U1J PE",
+                    "image_url": "https://images.unsplash.com/photo-1601312378427-b2260d90875c?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Upright",
+                    "price_per_hour": 120000,
+                    "rating": 4.6,
+                    "reviews_count": 315,
+                    "description": "Dòng đàn Upright phổ biến nhất thế giới, phù hợp cho người mới bắt đầu.",
+                    "features": [
+                        "Âm thanh sáng",
+                        "Phòng tập nhóm",
+                        "Giá rẻ sinh viên"
+                    ]
+                },
+                {
+                    "id": 4,
+                    "created_at": "2026-02-07T08:13:22.77281+00:00",
+                    "name": "Steinway & Sons Model D",
+                    "image_url": "https://images.unsplash.com/photo-1623823447986-7e44a2c009d1?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Grand",
+                    "price_per_hour": 500000,
+                    "rating": 5,
+                    "reviews_count": 42,
+                    "description": "Tuyệt phẩm Grand Piano dành cho biểu diễn chuyên nghiệp và ghi hình.",
+                    "features": [
+                        "Biểu diễn chuyên nghiệp",
+                        "Hỗ trợ quay MV",
+                        "Trà bánh miễn phí"
+                    ]
+                },
+                {
+                    "id": 3,
+                    "created_at": "2026-02-07T08:13:22.77281+00:00",
+                    "name": "Roland HP704 Digital",
+                    "image_url": "https://images.unsplash.com/photo-1598416824982-f3e79a850109?q=80&w=1000&auto=format&fit=crop",
+                    "category": "Digital",
+                    "price_per_hour": 80000,
+                    "rating": 4.5,
+                    "reviews_count": 210,
+                    "description": "Đàn điện cao cấp với công nghệ SuperNATURAL Piano Modeling cho âm thanh chân thực.",
+                    "features": [
+                        "Tai nghe Bluetooth",
+                        "Thu âm trực tiếp",
+                        "Kết nối iPad"
+                    ]
+                }
+            ]
+        }
+    },
+    "auth_users": {
+        "note": "Requires service_role key for admin access",
+        "count": 0
+    },
+    "summary": {
+        "total_tables": 2,
+        "total_records": 12,
+        "tables_exported": 1
+    }
+}
