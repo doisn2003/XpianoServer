@@ -1,0 +1,43 @@
+### Xpiano API Tests
+
+### 1. Welcome endpoint
+GET http://localhost:3000/
+
+### 2. Get all pianos
+GET http://localhost:3000/api/pianos
+
+### 3. Get piano by ID
+GET http://localhost:3000/api/pianos/1
+
+### 4. Get pianos with filters
+GET http://localhost:3000/api/pianos?category=Grand&minRating=4.5
+
+### 5. Get statistics
+GET http://localhost:3000/api/pianos/stats
+
+### 6. Create new piano
+POST http://localhost:3000/api/pianos
+Content-Type: application/json
+
+{
+  "name": "Kawai GL-30 Grand",
+  "image_url": "https://images.unsplash.com/photo-1520523839897-bd0b52f945a0?q=80&w=1000",
+  "category": "Grand",
+  "price_per_hour": 200000,
+  "rating": 4.8,
+  "reviews_count": 85,
+  "description": "Đàn Grand Piano Nhật Bản chất lượng cao với âm thanh ấm áp và giá cả phải chăng.",
+  "features": ["Âm thanh ấm", "Kích thước nhỏ gọn", "Phù hợp gia đình"]
+}
+
+### 7. Update piano
+PUT http://localhost:3000/api/pianos/1
+Content-Type: application/json
+
+{
+  "price_per_hour": 280000,
+  "rating": 5.0
+}
+
+### 8. Delete piano (uncomment to test)
+# DELETE http://localhost:3000/api/pianos/2
