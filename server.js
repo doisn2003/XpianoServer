@@ -3,6 +3,8 @@ const cors = require('cors');
 require('dotenv').config();
 
 const pianoRoutes = require('./routes/pianoRoutes');
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
 const app = express();
@@ -24,15 +26,55 @@ app.get('/', (req, res) => {
     res.json({
         success: true,
         message: 'Welcome to Xpiano API',
-        version: '1.0.0',
+        version: '2.0.0',
         endpoints: {
-            pianos: '/api/pianos',
-            stats: '/api/pianos/stats'
+            auth: {
+                register: 'POST /api/auth/register',
+                login: 'POST /api/auth/login',
+                profile: 'GET /api/auth/me',
+                forgotPassword: 'POST /api/auth/forgot-password',
+                resetPassword: 'POST /api/auth/reset-password'
+            },
+            pianos: {
+                list: 'GET /api/pianos',
+                get: 'GET /api/pianos/:id',
+                create: 'POST /api/pianos',
+                update: 'PUT /api/pianos/:id',
+                delete: 'DELETE /api/pianos/:id',
+                stats: 'GET /api/pianos/stats'
+            },
+            users: {
+                list: 'GET /api/users (Admin only)',
+                get: 'GET /api/users/:id (Admin only)',
+                create: 'POST /api/users (Admin only)',
+                update: 'PUT /api/users/:id (Admin only)',
+                delete: 'DELETE /api/users/:id (Admin only)',
+                stats: 'GET /api/users/stats (Admin only)'
+            },
+            favorites: {
+                list: 'GET /api/favorites',
+                add: 'POST /api/favorites/:pianoId',
+                remove: 'DELETE /api/favorites/:pianoId',
+                check: 'GET /api/favorites/check/:pianoId',
+                count: 'GET /api/favorites/count/:pianoId'
+            },
+            orders: {
+                list: 'GET /api/orders/my-orders',
+                create: 'POST /api/orders',
+                cancel: 'POST /api/orders/:id/cancel',
+                adminList: 'GET /api/orders (Admin)',
+                updateStatus: 'PUT /api/orders/:id/status (Admin)',
+                stats: 'GET /api/orders/stats (Admin)'
+            }
         }
     });
 });
 
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api/pianos', pianoRoutes);
+app.use('/api/favorites', require('./routes/favoriteRoutes'));
+app.use('/api/orders', require('./routes/orderRoutes'));
 
 // Error handlers (must be last)
 app.use(notFoundHandler);
