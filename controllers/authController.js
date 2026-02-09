@@ -412,6 +412,153 @@ class AuthController {
         }
     }
 
+    // POST /api/auth/admin-login
+    static async adminLogin(req, res) {
+        try {
+            const { email, password, role } = req.body;
+
+            if (!role || !['admin', 'warehouse_owner'].includes(role)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Role không hợp lệ. Chỉ chấp nhận admin hoặc warehouse_owner.'
+                });
+            }
+
+            // 1. Sign in with Supabase
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Email hoặc mật khẩu không chính xác'
+                });
+            }
+
+            // 2. Check that the user actually has the requested role
+            const profileRes = await pool.query(
+                'SELECT role FROM profiles WHERE id = $1',
+                [data.user.id]
+            );
+            const userRole = profileRes.rows.length > 0
+                ? profileRes.rows[0].role
+                : data.user.user_metadata?.role;
+
+            if (userRole !== role) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Tài khoản này không có quyền ${role === 'admin' ? 'Admin' : 'Chủ kho đàn'}.`
+                });
+            }
+
+            res.status(200).json({
+                success: true,
+                message: 'Đăng nhập thành công',
+                data: {
+                    user: { ...data.user, role: userRole },
+                    session: data.session,
+                    token: data.session.access_token
+                }
+            });
+
+        } catch (error) {
+            console.error('Error in adminLogin:', error);
+            res.status(500).json({ success: false, message: 'Lỗi khi đăng nhập', error: error.message });
+        }
+    }
+
+    // POST /api/auth/admin-register (OTP-verified)
+    static async adminRegister(req, res) {
+        try {
+            const { email, token, password, full_name, phone, role } = req.body;
+
+            if (!role || !['admin', 'warehouse_owner'].includes(role)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Role không hợp lệ. Chỉ chấp nhận admin hoặc warehouse_owner.'
+                });
+            }
+
+            // 1. Verify OTP from local DB
+            const verifyQuery = `
+                SELECT * FROM verification_codes 
+                WHERE email = $1 AND code = $2 AND type = 'signup' AND expires_at > NOW()
+            `;
+            const verifyResult = await pool.query(verifyQuery, [email, token]);
+
+            if (verifyResult.rows.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Mã xác thực không đúng hoặc đã hết hạn'
+                });
+            }
+
+            // 2. Create User in Supabase
+            const { data: userData, error: createError } = await supabaseAdmin.auth.admin.createUser({
+                email,
+                password,
+                email_confirm: true,
+                user_metadata: {
+                    full_name,
+                    phone,
+                    role
+                }
+            });
+
+            if (createError) throw createError;
+            const user = userData.user;
+
+            // 3. Sync to profiles
+            await supabaseAdmin.from('profiles').upsert({
+                id: user.id,
+                full_name,
+                phone,
+                role,
+                email,
+                avatar_url: null
+            });
+
+            // 4. Sync to public.users
+            try {
+                await pool.query(`
+                    INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+                    ON CONFLICT (id) DO UPDATE 
+                    SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
+                `, [user.id, email, full_name, phone, role]);
+            } catch (dbError) {
+                console.warn('Sync to public.users warning:', dbError.message);
+            }
+
+            // 5. Delete used OTP
+            await pool.query('DELETE FROM verification_codes WHERE email = $1 AND type = $2', [email, 'signup']);
+
+            // 6. Auto Login
+            const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+                email,
+                password
+            });
+
+            if (loginError) throw loginError;
+
+            res.status(201).json({
+                success: true,
+                message: 'Đăng ký thành công',
+                data: {
+                    user: { ...loginData.user, role },
+                    session: loginData.session,
+                    token: loginData.session.access_token
+                }
+            });
+
+        } catch (error) {
+            console.error('Error in adminRegister:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi đăng ký tài khoản quản trị',
+                error: error.message
+            });
+        }
+    }
+
     // PUT /api/auth/change-password
     static async changePassword(req, res) {
         try {

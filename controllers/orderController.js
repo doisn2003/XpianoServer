@@ -169,21 +169,38 @@ class OrderController {
     // GET /api/orders (Admin)
     static async getAllOrders(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
-            const { data, error } = await supabaseAdmin
+            // 1. Fetch orders with piano info (profiles FK doesn't exist, so skip join)
+            const { data: orders, error } = await supabaseAdmin
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category),
-                    user:profiles!orders_user_id_fkey(full_name, email)
+                    piano:pianos(id, name, image_url, category)
                 `)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
+            // 2. Enrich with user profile data from profiles table
+            const userIds = [...new Set(orders.map(o => o.user_id).filter(Boolean))];
+            let profilesMap = {};
+            if (userIds.length > 0) {
+                const { data: profiles } = await supabaseAdmin
+                    .from('profiles')
+                    .select('id, full_name, phone, role, avatar_url')
+                    .in('id', userIds);
+                if (profiles) {
+                    profilesMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+                }
+            }
+
+            const enrichedOrders = orders.map(order => ({
+                ...order,
+                user: profilesMap[order.user_id] || null
+            }));
+
             res.status(200).json({
                 success: true,
-                data: data
+                data: enrichedOrders
             });
         } catch (error) {
             console.error('Error in getAllOrders:', error);
