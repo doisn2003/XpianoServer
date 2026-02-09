@@ -21,8 +21,8 @@ class OrderController {
             const user = req.user;
             const { piano_id, type, rental_start_date, rental_end_date } = req.body;
 
-            // 1. Get piano details
-            const { data: piano, error: pianoError } = await supabase
+            // 1. Get piano details (Use supabaseAdmin to bypass RLS)
+            const { data: piano, error: pianoError } = await supabaseAdmin
                 .from('pianos')
                 .select('price_per_hour')
                 .eq('id', piano_id)
@@ -63,8 +63,8 @@ class OrderController {
                 totalPrice = OrderController.calculateBuyPrice(piano.price_per_hour);
             }
 
-            // 3. Create Order
-            const { data: order, error } = await supabase
+            // 3. Create Order (Use supabaseAdmin to bypass RLS)
+            const { data: order, error } = await supabaseAdmin
                 .from('orders')
                 .insert({
                     user_id: user.id,
@@ -170,7 +170,7 @@ class OrderController {
     static async getAllOrders(req, res) {
         try {
             // const supabase = getSupabaseClient(req); // Use global for Service Role
-            const { data, error } = await supabase
+            const { data, error } = await supabaseAdmin
                 .from('orders')
                 .select(`
                     *,
@@ -213,7 +213,7 @@ class OrderController {
                 updates.approved_at = new Date().toISOString();
             }
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('orders')
                 .update(updates)
                 .eq('id', id);
@@ -242,7 +242,7 @@ class OrderController {
             const { id } = req.params;
             const user = req.user;
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('orders')
                 .update({ status: 'cancelled' })
                 .eq('id', id)
@@ -270,7 +270,7 @@ class OrderController {
     static async getOrderStats(req, res) {
         try {
             // const supabase = getSupabaseClient(req); // Use global for Service Role
-            const { data: orders, error } = await supabase
+            const { data: orders, error } = await supabaseAdmin
                 .from('orders')
                 .select('type, status, total_price');
 
