@@ -9,10 +9,25 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 console.log('Supabase Check - URL:', supabaseUrl);
-console.log('Supabase Check - Key (starts with):', supabaseKey ? supabaseKey.substring(0, 15) + '...' : 'MISSING');
+// Enhanced logging to debug RLS
+try {
+    const payload = JSON.parse(atob(supabaseKey.split('.')[1]));
+    console.log('Supabase Check - Key Role:', payload.role);
+} catch (e) {
+    console.log('Supabase Check - Could not decode key');
+}
 console.log('Supabase Check - Is Service Role:', supabaseKey && supabaseKey.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') ? 'Likely Yes' : 'Unknown');
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+    }
+});
+
+// Admin client strictly for database operations that need to bypass RLS
+const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
     auth: {
         autoRefreshToken: false,
         persistSession: false,
@@ -38,4 +53,4 @@ const getSupabaseClient = (req) => {
     return supabase;
 };
 
-module.exports = { supabase, getSupabaseClient };
+module.exports = { supabase, supabaseAdmin, getSupabaseClient };
