@@ -1,4 +1,4 @@
-const { supabase } = require('../utils/supabaseClient');
+const { supabase, supabaseAdmin } = require('../utils/supabaseClient');
 
 class OrderController {
     // Helper: Calculate rental price
@@ -100,9 +100,11 @@ class OrderController {
     // GET /api/orders/my-orders
     static async getMyOrders(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
+            // Use supabaseAdmin to bypass RLS
             const user = req.user;
-            const { data, error } = await supabase
+            console.log('GetMyOrders - User ID:', user?.id);
+
+            const { data, error } = await supabaseAdmin
                 .from('orders')
                 .select(`
                     *,
@@ -111,7 +113,12 @@ class OrderController {
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
 
-            if (error) throw error;
+            if (error) {
+                console.error('GetMyOrders - Supabase Error:', error);
+                throw error;
+            }
+
+            console.log('GetMyOrders - Success, count:', data?.length);
 
             res.status(200).json({
                 success: true,
@@ -130,9 +137,9 @@ class OrderController {
     // GET /api/orders/active-rentals
     static async getMyActiveRentals(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
+            // Use supabaseAdmin to bypass RLS
             const user = req.user;
-            const { data, error } = await supabase
+            const { data, error } = await supabaseAdmin
                 .from('rentals')
                 .select(`
                     *,

@@ -58,6 +58,12 @@ class UserModel {
                 paramCount++;
             }
 
+            if (userData.date_of_birth !== undefined) {
+                fields.push(`date_of_birth = $${paramCount}`);
+                params.push(userData.date_of_birth);
+                paramCount++;
+            }
+
             if (fields.length === 0) {
                 throw new Error('No fields to update');
             }

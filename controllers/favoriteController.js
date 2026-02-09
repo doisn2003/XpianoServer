@@ -1,13 +1,14 @@
-const { supabase } = require('../utils/supabaseClient');
+const { supabase, supabaseAdmin } = require('../utils/supabaseClient');
 
 class FavoriteController {
     // GET /api/favorites - Get all favorites for current user
     static async getMyFavorites(req, res) {
         try {
-
             const user = req.user;
+            console.log('GetMyFavorites - Request User ID:', user?.id);
 
-            const { data, error } = await supabase
+            // Use supabaseAdmin (Service Role) to bypass RLS
+            const { data, error } = await supabaseAdmin
                 .from('favorites')
                 .select(`
                     *,
@@ -16,13 +17,12 @@ class FavoriteController {
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
 
-            console.log('GetFavorites - User ID:', user.id);
-            console.log('GetFavorites - Data count:', data ? data.length : 'null');
-            if (error) console.error('GetFavorites - Error:', error);
-
             if (error) {
+                console.error('GetMyFavorites - Supabase Error:', error);
                 throw error;
             }
+
+            console.log('GetMyFavorites - Success, count:', data?.length);
 
             res.status(200).json({
                 success: true,
@@ -46,7 +46,7 @@ class FavoriteController {
             const user = req.user;
             const { pianoId } = req.params;
 
-            const { data, error } = await supabase
+            const { data, error } = await supabaseAdmin
                 .from('favorites')
                 .select('id')
                 .eq('user_id', user.id)
@@ -78,7 +78,7 @@ class FavoriteController {
             const user = req.user;
             const { pianoId } = req.params;
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('favorites')
                 .insert({
                     user_id: user.id,
@@ -116,7 +116,7 @@ class FavoriteController {
             const user = req.user;
             const { pianoId } = req.params;
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('favorites')
                 .delete()
                 .eq('user_id', user.id)

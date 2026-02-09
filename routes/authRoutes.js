@@ -4,10 +4,14 @@ const AuthController = require('../controllers/authController');
 const { authenticate } = require('../middlewares/authMiddleware');
 
 // Public routes
-router.post('/register', AuthController.register);
+// Public routes
+router.post('/register', AuthController.register); // Deprecated but kept?
 router.post('/login', AuthController.login);
+router.post('/send-otp', AuthController.sendOtp);
+router.post('/register-verify', AuthController.registerWithOtp);
+router.post('/login-otp', AuthController.loginWithOtpVerify); // Optional for login flow
 router.post('/forgot-password', AuthController.forgotPassword);
-router.post('/reset-password', AuthController.resetPassword);
+router.post('/reset-password', AuthController.resetPassword); // Now acts as OTP verify + Reset
 
 // Protected routes (require authentication)
 router.get('/me', authenticate, AuthController.getProfile);
