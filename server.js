@@ -50,6 +50,21 @@ app.get('/', (req, res) => {
                 update: 'PUT /api/users/:id (Admin only)',
                 delete: 'DELETE /api/users/:id (Admin only)',
                 stats: 'GET /api/users/stats (Admin only)'
+            },
+            favorites: {
+                list: 'GET /api/favorites',
+                add: 'POST /api/favorites/:pianoId',
+                remove: 'DELETE /api/favorites/:pianoId',
+                check: 'GET /api/favorites/check/:pianoId',
+                count: 'GET /api/favorites/count/:pianoId'
+            },
+            orders: {
+                list: 'GET /api/orders/my-orders',
+                create: 'POST /api/orders',
+                cancel: 'POST /api/orders/:id/cancel',
+                adminList: 'GET /api/orders (Admin)',
+                updateStatus: 'PUT /api/orders/:id/status (Admin)',
+                stats: 'GET /api/orders/stats (Admin)'
             }
         }
     });
@@ -58,6 +73,8 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/pianos', pianoRoutes);
+app.use('/api/favorites', require('./routes/favoriteRoutes'));
+app.use('/api/orders', require('./routes/orderRoutes'));
 
 // Error handlers (must be last)
 app.use(notFoundHandler);

@@ -1,4 +1,4 @@
-const supabase = require('../utils/supabaseClient');
+const { supabase } = require('../utils/supabaseClient');
 
 const authenticate = async (req, res, next) => {
     try {
@@ -31,7 +31,8 @@ const authenticate = async (req, res, next) => {
         console.error('Auth Middleware Error:', error);
         res.status(500).json({
             success: false,
-            message: 'Lỗi xác thực'
+            message: 'Lỗi xác thực hệ thống',
+            error: error.message
         });
     }
 };

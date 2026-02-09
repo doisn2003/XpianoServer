@@ -1,4 +1,4 @@
-const supabase = require('../utils/supabaseClient');
+const { supabase, getSupabaseClient } = require('../utils/supabaseClient');
 const UserModel = require('../models/userModel');
 
 class AuthController {
@@ -271,43 +271,14 @@ class AuthController {
                 });
             }
 
-            // Supabase auth.updateUser uses the logged in user's session (from authMiddleware)
-            // But on backend, we use the admin client or pass the user's access token if we had it.
-            // Since we are using service role key in backend potentially (or just anon key), updateUser works for the USER linked to the client.
-            // BUT here 'supabase' is likely the ADMIN client (service role) or just anon. 
-            // If it's Service Role, `auth.updateUser` updates the user *configured in the client*? NO. 
-            // We need `auth.admin.updateUserById` if we are admin.
-            // OR we use the user's access token to create a scoped client.
+            // Use authenticated client to change own password
+            const supabaseClient = getSupabaseClient(req);
 
-            // However, seeing `supabaseClient.js`, it uses `createClient(url, key)`. 
-            // If key is SERVICE_ROLE, we can use `supabase.auth.admin.updateUserById(uid, attributes)`.
-            // If key is ANON, we can't update another user's password without their token.
-
-            // The `authMiddleware` verified the token. `req.token` has the user's access token.
-            // We should ideally use that token to create a scoped client to update the password.
-            // OR use the admin client.
-
-            // Let's check `supabaseClient.js` again? 
-            // The user didn't show it, but typically backend uses Service Role.
-            // If so, `supabase.auth.admin.updateUserById(user.id, { password })` is the way.
-
-            // Let's try `supabase.auth.admin.updateUserById` first. 
-            // Wait, checking `authController.js` imports: `const supabase = require('../utils/supabaseClient');`
-
-            const user = req.user;
-
-            const { error } = await supabase.auth.admin.updateUserById(
-                user.id,
-                { password: password }
-            );
+            const { error } = await supabaseClient.auth.updateUser({
+                password: password
+            });
 
             if (error) {
-                // If admin api is not available (key constraint), try updateUser with the user's token if we can set session?
-                // But for now, let's assume Backend has privileges or we need to rethink this.
-                // Re-reading `supabaseClient.js` view from earlier...
-                // It just takes `process.env.SUPABASE_KEY`. If that's the ANON key, `admin` namespace won't work.
-                // If it is ANON key, we need `req.token`.
-
                 return res.status(400).json({
                     success: false,
                     message: error.message
