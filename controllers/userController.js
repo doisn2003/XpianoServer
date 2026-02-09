@@ -156,55 +156,12 @@ class UserController {
 
     // POST /api/users - Create user (Admin only)
     static async createUser(req, res) {
-        try {
-            const { email, password, full_name, phone, role } = req.body;
-
-            // Validation
-            if (!email || !password || !full_name) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Email, mật khẩu và họ tên là bắt buộc'
-                });
-            }
-
-            // Validate role
-            if (role && !['user', 'admin', 'teacher'].includes(role)) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Role không hợp lệ'
-                });
-            }
-
-            // Check if user exists
-            const existingUser = await UserModel.findByEmail(email);
-            if (existingUser) {
-                return res.status(409).json({
-                    success: false,
-                    message: 'Email đã được sử dụng'
-                });
-            }
-
-            const user = await UserModel.create({
-                email,
-                password,
-                full_name,
-                phone,
-                role: role || 'user'
-            });
-
-            res.status(201).json({
-                success: true,
-                message: 'Tạo người dùng thành công',
-                data: user
-            });
-        } catch (error) {
-            console.error('Error in createUser:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Lỗi khi tạo người dùng',
-                error: error.message
-            });
-        }
+        // This requires Supabase Service Role Key to create users via API
+        // For now, return 501 Not Implemented or asking to use Supabase Dashboard
+        return res.status(501).json({
+            success: false,
+            message: 'Tính năng tạo người dùng qua API chưa được hỗ trợ. Vui lòng sử dụng Supabase Dashboard hoặc trang Đăng ký.'
+        });
     }
 }
 

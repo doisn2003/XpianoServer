@@ -216,12 +216,13 @@ CREATE OR REPLACE VIEW orders_detailed AS
 SELECT 
   o.*,
   p.full_name as user_name,
-  p.email as user_email,
+  au.email as user_email,
   pi.name as piano_name,
   pi.category as piano_category,
   pi.image_url as piano_image
 FROM orders o
 LEFT JOIN profiles p ON o.user_id = p.id
+LEFT JOIN auth.users au ON o.user_id = au.id
 LEFT JOIN pianos pi ON o.piano_id = pi.id;
 
 -- View: Active rentals with details

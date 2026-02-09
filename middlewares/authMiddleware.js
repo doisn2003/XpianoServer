@@ -1,78 +1,55 @@
-const jwt = require('jsonwebtoken');
-const UserModel = require('../models/userModel');
+const supabase = require('../utils/supabaseClient');
 
-// Verify JWT token and authenticate user
 const authenticate = async (req, res, next) => {
     try {
-        // Get token from header
         const authHeader = req.headers.authorization;
-
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({
                 success: false,
-                message: 'Vui lòng đăng nhập để tiếp tục'
+                message: 'Không tìm thấy token xác thực'
             });
         }
 
-        const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+        const token = authHeader.split(' ')[1];
 
-        // Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        // Verify token using Supabase
+        const { data: { user }, error } = await supabase.auth.getUser(token);
 
-        // Get user from database
-        const user = await UserModel.findById(decoded.userId);
-
-        if (!user) {
+        if (error || !user) {
             return res.status(401).json({
                 success: false,
-                message: 'Người dùng không tồn tại'
+                message: 'Token không hợp lệ hoặc đã hết hạn'
             });
         }
 
         // Attach user to request
-        req.user = {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            full_name: user.full_name
-        };
+        req.user = user;
+        req.token = token;
 
         next();
     } catch (error) {
-        if (error.name === 'JsonWebTokenError') {
-            return res.status(401).json({
-                success: false,
-                message: 'Token không hợp lệ'
-            });
-        }
-
-        if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({
-                success: false,
-                message: 'Token đã hết hạn, vui lòng đăng nhập lại'
-            });
-        }
-
-        console.error('Authentication error:', error);
+        console.error('Auth Middleware Error:', error);
         res.status(500).json({
             success: false,
-            message: 'Lỗi xác thực',
-            error: error.message
+            message: 'Lỗi xác thực'
         });
     }
 };
 
-// Check if user has required role
-const authorize = (...allowedRoles) => {
+const authorize = (...roles) => {
     return (req, res, next) => {
         if (!req.user) {
             return res.status(401).json({
                 success: false,
-                message: 'Vui lòng đăng nhập để tiếp tục'
+                message: 'Chưa xác thực'
             });
         }
 
-        if (!allowedRoles.includes(req.user.role)) {
+        // Check role from user_metadata or app_metadata
+        // Supabase stores role in app_metadata usually, or we put it in user_metadata
+        const userRole = req.user.user_metadata?.role || req.user.app_metadata?.role || 'user';
+
+        if (!roles.includes(userRole)) {
             return res.status(403).json({
                 success: false,
                 message: 'Bạn không có quyền truy cập tài nguyên này'
@@ -83,39 +60,5 @@ const authorize = (...allowedRoles) => {
     };
 };
 
-// Optional authentication (doesn't fail if no token)
-const optionalAuthenticate = async (req, res, next) => {
-    try {
-        const authHeader = req.headers.authorization;
+module.exports = { authenticate, authorize };
 
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            req.user = null;
-            return next();
-        }
-
-        const token = authHeader.substring(7);
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await UserModel.findById(decoded.userId);
-
-        if (user) {
-            req.user = {
-                id: user.id,
-                email: user.email,
-                role: user.role,
-                full_name: user.full_name
-            };
-        }
-
-        next();
-    } catch (error) {
-        // Silently fail for optional authentication
-        req.user = null;
-        next();
-    }
-};
-
-module.exports = {
-    authenticate,
-    authorize,
-    optionalAuthenticate
-};
