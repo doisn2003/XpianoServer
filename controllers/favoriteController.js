@@ -4,7 +4,7 @@ class FavoriteController {
     // GET /api/favorites - Get all favorites for current user
     static async getMyFavorites(req, res) {
         try {
-            const supabase = getSupabaseClient(req);
+
             const user = req.user;
 
             const { data, error } = await supabase
@@ -15,6 +15,10 @@ class FavoriteController {
                 `)
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
+
+            console.log('GetFavorites - User ID:', user.id);
+            console.log('GetFavorites - Data count:', data ? data.length : 'null');
+            if (error) console.error('GetFavorites - Error:', error);
 
             if (error) {
                 throw error;

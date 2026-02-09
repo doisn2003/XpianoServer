@@ -8,7 +8,17 @@ if (!supabaseUrl || !supabaseKey) {
     throw new Error('Missing Supabase URL or Key in environment variables');
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+console.log('Supabase Check - URL:', supabaseUrl);
+console.log('Supabase Check - Key (starts with):', supabaseKey ? supabaseKey.substring(0, 15) + '...' : 'MISSING');
+console.log('Supabase Check - Is Service Role:', supabaseKey && supabaseKey.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') ? 'Likely Yes' : 'Unknown');
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+    }
+});
 
 const getSupabaseClient = (req) => {
     // If request has authorization header, create a client with that context

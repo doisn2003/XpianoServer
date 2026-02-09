@@ -16,12 +16,14 @@ const authenticate = async (req, res, next) => {
         const { data: { user }, error } = await supabase.auth.getUser(token);
 
         if (error || !user) {
+            console.error('Auth Middleware Error:', error);
             return res.status(401).json({
                 success: false,
-                message: 'Token không hợp lệ hoặc đã hết hạn'
+                message: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn'
             });
         }
 
+        console.log('Auth Middleware Success. User ID:', user.id);
         // Attach user to request
         req.user = user;
         req.token = token;
