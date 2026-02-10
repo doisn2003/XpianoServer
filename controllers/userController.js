@@ -1,4 +1,5 @@
 const UserModel = require('../models/userModel');
+const { supabaseAdmin } = require('../utils/supabaseClient');
 
 class UserController {
     // GET /api/users - Get all users (Admin only)
@@ -162,6 +163,233 @@ class UserController {
             success: false,
             message: 'Tính năng tạo người dùng qua API chưa được hỗ trợ. Vui lòng sử dụng Supabase Dashboard hoặc trang Đăng ký.'
         });
+    }
+
+    // ==============================================
+    // TEACHER PROFILE MANAGEMENT (Admin)
+    // ==============================================
+
+    // GET /api/users/teacher-profiles - Get all teacher profiles with filtering
+    static async getAllTeacherProfiles(req, res) {
+        try {
+            const { verification_status } = req.query;
+
+            let query = supabaseAdmin
+                .from('teacher_profiles')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (verification_status) {
+                query = query.eq('verification_status', verification_status);
+            }
+
+            const { data, error } = await query;
+
+            if (error) throw error;
+
+            console.log(`📋 Admin fetched ${data?.length || 0} teacher profiles` + 
+                        (verification_status ? ` with status: ${verification_status}` : ''));
+
+            res.status(200).json({
+                success: true,
+                count: data?.length || 0,
+                data: data || []
+            });
+        } catch (error) {
+            console.error('❌ Error in getAllTeacherProfiles:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi lấy danh sách hồ sơ giáo viên',
+                error: error.message
+            });
+        }
+    }
+
+    // PUT /api/users/teacher-profiles/:id/approve - Approve teacher profile
+    static async approveTeacher(req, res) {
+        try {
+            const { id } = req.params;
+            const adminId = req.user.id;
+
+            // Get teacher profile first
+            const { data: profile, error: fetchError } = await supabaseAdmin
+                .from('teacher_profiles')
+                .select('user_id, verification_status')
+                .eq('id', id)
+                .single();
+
+            if (fetchError || !profile) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Không tìm thấy hồ sơ giáo viên'
+                });
+            }
+
+            if (profile.verification_status === 'approved') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Hồ sơ đã được phê duyệt trước đó'
+                });
+            }
+
+            // Update teacher profile status
+            const { data, error } = await supabaseAdmin
+                .from('teacher_profiles')
+                .update({
+                    verification_status: 'approved',
+                    approved_at: new Date().toISOString(),
+                    rejected_reason: null,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            console.log(`✅ Admin ${adminId} approved teacher profile ${id} for user ${profile.user_id}`);
+
+            res.status(200).json({
+                success: true,
+                message: 'Phê duyệt hồ sơ giáo viên thành công',
+                data
+            });
+        } catch (error) {
+            console.error('Error in approveTeacher:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi phê duyệt hồ sơ',
+                error: error.message
+            });
+        }
+    }
+
+    // PUT /api/users/teacher-profiles/:id/reject - Reject teacher profile
+    static async rejectTeacher(req, res) {
+        try {
+            const { id } = req.params;
+            const { rejected_reason } = req.body;
+            const adminId = req.user.id;
+
+            if (!rejected_reason || rejected_reason.trim() === '') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Vui lòng cung cấp lý do từ chối'
+                });
+            }
+
+            // Get teacher profile first
+            const { data: profile, error: fetchError } = await supabaseAdmin
+                .from('teacher_profiles')
+                .select('user_id, verification_status')
+                .eq('id', id)
+                .single();
+
+            if (fetchError || !profile) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Không tìm thấy hồ sơ giáo viên'
+                });
+            }
+
+            // Update teacher profile status
+            const { data, error } = await supabaseAdmin
+                .from('teacher_profiles')
+                .update({
+                    verification_status: 'rejected',
+                    rejected_reason: rejected_reason.trim(),
+                    approved_at: null,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            console.log(`❌ Admin ${adminId} rejected teacher profile ${id} for user ${profile.user_id}: ${rejected_reason}`);
+
+            res.status(200).json({
+                success: true,
+                message: 'Từ chối hồ sơ giáo viên thành công',
+                data
+            });
+        } catch (error) {
+            console.error('Error in rejectTeacher:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi từ chối hồ sơ',
+                error: error.message
+            });
+        }
+    }
+
+    // PUT /api/users/teacher-profiles/:id/revoke - Revoke teacher approval (cancel contract)
+    static async revokeTeacherApproval(req, res) {
+        try {
+            const { id } = req.params;
+            const { revoke_reason } = req.body;
+            const adminId = req.user.id;
+
+            if (!revoke_reason || revoke_reason.trim() === '') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Vui lòng cung cấp lý do hủy hợp đồng'
+                });
+            }
+
+            // Get teacher profile first
+            const { data: profile, error: fetchError } = await supabaseAdmin
+                .from('teacher_profiles')
+                .select('user_id, full_name, verification_status')
+                .eq('id', id)
+                .single();
+
+            if (fetchError || !profile) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Không tìm thấy hồ sơ giáo viên'
+                });
+            }
+
+            if (profile.verification_status !== 'approved') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Chỉ có thể hủy hợp đồng với giáo viên đang hoạt động'
+                });
+            }
+
+            // Update teacher profile status back to rejected
+            // Teacher keeps their account and can resubmit profile
+            const { data, error } = await supabaseAdmin
+                .from('teacher_profiles')
+                .update({
+                    verification_status: 'rejected',
+                    rejected_reason: `[HỦY HỢP ĐỒNG] ${revoke_reason.trim()}`,
+                    approved_at: null,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            console.log(`🔴 Admin ${adminId} revoked approval for teacher ${id} (${profile.full_name}): ${revoke_reason}`);
+
+            res.status(200).json({
+                success: true,
+                message: 'Đã hủy hợp đồng. Giáo viên có thể nộp lại hồ sơ sau khi chỉnh sửa.',
+                data
+            });
+        } catch (error) {
+            console.error('Error in revokeTeacherApproval:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi hủy hợp đồng',
+                error: error.message
+            });
+        }
     }
 }
 
