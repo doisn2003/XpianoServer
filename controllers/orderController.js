@@ -1,17 +1,22 @@
 const { supabase, supabaseAdmin } = require('../utils/supabaseClient');
 
 class OrderController {
-    // Helper: Calculate rental price
-    static calculateRentalPrice(pricePerHour, days) {
-        const basePrice = pricePerHour * 8 * days;
+    // Helper: Calculate rental price (based on price per day)
+    static calculateRentalPrice(pricePerDay, days) {
+        const basePrice = pricePerDay * days;
         if (days >= 8) return Math.round(basePrice * 0.85); // 15% discount
         if (days >= 3) return Math.round(basePrice * 0.90); // 10% discount
         return basePrice;
     }
 
-    // Helper: Calculate buy price
-    static calculateBuyPrice(pricePerHour) {
-        return pricePerHour * 1000;
+    // Helper: Calculate buy price (use price field if available, otherwise fallback to calculation)
+    static calculateBuyPrice(price, pricePerDay) {
+        // If piano has explicit price, use it
+        if (price && price > 0) {
+            return price;
+        }
+        // Otherwise, calculate from pricePerDay
+        return pricePerDay * 100;
     }
 
     // POST /api/orders
@@ -24,7 +29,7 @@ class OrderController {
             // 1. Get piano details (Use supabaseAdmin to bypass RLS)
             const { data: piano, error: pianoError } = await supabaseAdmin
                 .from('pianos')
-                .select('price_per_hour')
+                .select('price_per_day, price')
                 .eq('id', piano_id)
                 .single();
 
@@ -58,9 +63,9 @@ class OrderController {
                     });
                 }
 
-                totalPrice = OrderController.calculateRentalPrice(piano.price_per_hour, rentalDays);
+                totalPrice = OrderController.calculateRentalPrice(piano.price_per_day, rentalDays);
             } else {
-                totalPrice = OrderController.calculateBuyPrice(piano.price_per_hour);
+                totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
             }
 
             // 3. Create Order (Use supabaseAdmin to bypass RLS)

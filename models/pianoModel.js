@@ -22,9 +22,9 @@ class PianoModel {
                 paramCount++;
             }
 
-            // Filter by max price per hour
+            // Filter by max price per day
             if (filters.maxPrice) {
-                query += ` AND price_per_hour <= $${paramCount}`;
+                query += ` AND price_per_day <= $${paramCount}`;
                 params.push(filters.maxPrice);
                 paramCount++;
             }
@@ -53,8 +53,8 @@ class PianoModel {
     static async create(pianoData) {
         try {
             const query = `
-        INSERT INTO pianos (name, image_url, category, price_per_hour, rating, reviews_count, description, features)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO pianos (name, image_url, category, price_per_day, price, rating, reviews_count, description, features)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *;
       `;
 
@@ -67,7 +67,8 @@ class PianoModel {
                 pianoData.name,
                 pianoData.image_url,
                 pianoData.category,
-                pianoData.price_per_hour,
+                pianoData.price_per_day,
+                pianoData.price || null,
                 pianoData.rating || 0,
                 pianoData.reviews_count || 0,
                 pianoData.description,
@@ -105,9 +106,15 @@ class PianoModel {
                 paramCount++;
             }
 
-            if (pianoData.price_per_hour !== undefined) {
-                fields.push(`price_per_hour = $${paramCount}`);
-                params.push(pianoData.price_per_hour);
+            if (pianoData.price_per_day !== undefined) {
+                fields.push(`price_per_day = $${paramCount}`);
+                params.push(pianoData.price_per_day);
+                paramCount++;
+            }
+
+            if (pianoData.price !== undefined) {
+                fields.push(`price = $${paramCount}`);
+                params.push(pianoData.price);
                 paramCount++;
             }
 
@@ -175,7 +182,8 @@ class PianoModel {
         SELECT 
           COUNT(*) as total_pianos,
           AVG(rating) as avg_rating,
-          AVG(price_per_hour) as avg_price,
+          AVG(price_per_day) as avg_price_per_day,
+          AVG(price) as avg_price,
           COUNT(DISTINCT category) as total_categories
         FROM pianos;
       `;

@@ -406,19 +406,34 @@ class AuthController {
             const user = req.user;
             const { full_name, phone, avatar_url, date_of_birth } = req.body;
 
-            // Update in Supabase Auth Metadata first
-            const { error: authError } = await supabase.auth.updateUser({
-                data: { full_name, phone, date_of_birth }
-            });
-            if (authError) throw authError;
+            console.log('🔄 Updating profile for user:', user.id);
+            console.log('📝 Data to update:', { full_name, phone, avatar_url, date_of_birth });
 
-            // Then sync to profiles
+            // Update in Supabase Auth Metadata using Admin client
+            const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
+                user.id,
+                {
+                    user_metadata: { 
+                        full_name, 
+                        phone, 
+                        date_of_birth 
+                    }
+                }
+            );
+            if (authError) {
+                console.error('❌ Auth metadata update error:', authError);
+                throw authError;
+            }
+
+            // Then sync to profiles table (including avatar_url)
             const updatedProfile = await UserModel.update(user.id, {
                 full_name,
                 phone,
                 avatar_url,
                 date_of_birth
             });
+
+            console.log('✅ Profile updated successfully:', updatedProfile);
 
             res.status(200).json({
                 success: true,
@@ -427,7 +442,7 @@ class AuthController {
             });
 
         } catch (error) {
-            console.error('Error in updateProfile:', error);
+            console.error('❌ Error in updateProfile:', error);
             res.status(500).json({
                 success: false,
                 message: 'Lỗi khi cập nhật hồ sơ',
