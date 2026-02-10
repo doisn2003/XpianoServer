@@ -12,6 +12,8 @@ router.post('/register-verify', AuthController.registerWithOtp);
 router.post('/login-otp', AuthController.loginWithOtpVerify); // Optional for login flow
 router.post('/forgot-password', AuthController.forgotPassword);
 router.post('/reset-password', AuthController.resetPassword); // Now acts as OTP verify + Reset
+router.post('/admin-login', AuthController.adminLogin);
+router.post('/admin-register', AuthController.adminRegister);
 
 // Protected routes (require authentication)
 router.get('/me', authenticate, AuthController.getProfile);

@@ -10,6 +10,12 @@ router.use(authorize('admin'));
 // Statistics endpoint (must come first)
 router.get('/stats', UserController.getStats);
 
+// Teacher profiles management
+router.get('/teacher-profiles', UserController.getAllTeacherProfiles);
+router.put('/teacher-profiles/:id/approve', UserController.approveTeacher);
+router.put('/teacher-profiles/:id/reject', UserController.rejectTeacher);
+router.put('/teacher-profiles/:id/revoke', UserController.revokeTeacherApproval);
+
 // CRUD routes
 router.get('/', UserController.getAllUsers);
 router.get('/:id', UserController.getUserById);

@@ -5,6 +5,7 @@ require('dotenv').config();
 const pianoRoutes = require('./routes/pianoRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
+const teacherRoutes = require('./routes/teacherRoutes');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
 const app = express();
@@ -75,6 +76,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/pianos', pianoRoutes);
 app.use('/api/favorites', require('./routes/favoriteRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
+app.use('/api/teacher', teacherRoutes);
 
 // Error handlers (must be last)
 app.use(notFoundHandler);

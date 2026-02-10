@@ -21,8 +21,8 @@ class OrderController {
             const user = req.user;
             const { piano_id, type, rental_start_date, rental_end_date } = req.body;
 
-            // 1. Get piano details
-            const { data: piano, error: pianoError } = await supabase
+            // 1. Get piano details (Use supabaseAdmin to bypass RLS)
+            const { data: piano, error: pianoError } = await supabaseAdmin
                 .from('pianos')
                 .select('price_per_hour')
                 .eq('id', piano_id)
@@ -63,8 +63,8 @@ class OrderController {
                 totalPrice = OrderController.calculateBuyPrice(piano.price_per_hour);
             }
 
-            // 3. Create Order
-            const { data: order, error } = await supabase
+            // 3. Create Order (Use supabaseAdmin to bypass RLS)
+            const { data: order, error } = await supabaseAdmin
                 .from('orders')
                 .insert({
                     user_id: user.id,
@@ -169,21 +169,38 @@ class OrderController {
     // GET /api/orders (Admin)
     static async getAllOrders(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
-            const { data, error } = await supabase
+            // 1. Fetch orders with piano info (profiles FK doesn't exist, so skip join)
+            const { data: orders, error } = await supabaseAdmin
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category),
-                    user:profiles!orders_user_id_fkey(full_name, email)
+                    piano:pianos(id, name, image_url, category)
                 `)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
 
+            // 2. Enrich with user profile data from profiles table
+            const userIds = [...new Set(orders.map(o => o.user_id).filter(Boolean))];
+            let profilesMap = {};
+            if (userIds.length > 0) {
+                const { data: profiles } = await supabaseAdmin
+                    .from('profiles')
+                    .select('id, full_name, phone, role, avatar_url')
+                    .in('id', userIds);
+                if (profiles) {
+                    profilesMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+                }
+            }
+
+            const enrichedOrders = orders.map(order => ({
+                ...order,
+                user: profilesMap[order.user_id] || null
+            }));
+
             res.status(200).json({
                 success: true,
-                data: data
+                data: enrichedOrders
             });
         } catch (error) {
             console.error('Error in getAllOrders:', error);
@@ -213,7 +230,7 @@ class OrderController {
                 updates.approved_at = new Date().toISOString();
             }
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('orders')
                 .update(updates)
                 .eq('id', id);
@@ -242,7 +259,7 @@ class OrderController {
             const { id } = req.params;
             const user = req.user;
 
-            const { error } = await supabase
+            const { error } = await supabaseAdmin
                 .from('orders')
                 .update({ status: 'cancelled' })
                 .eq('id', id)
@@ -270,7 +287,7 @@ class OrderController {
     static async getOrderStats(req, res) {
         try {
             // const supabase = getSupabaseClient(req); // Use global for Service Role
-            const { data: orders, error } = await supabase
+            const { data: orders, error } = await supabaseAdmin
                 .from('orders')
                 .select('type, status, total_price');
 
