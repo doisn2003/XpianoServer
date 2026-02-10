@@ -276,11 +276,25 @@ class AuthController {
                 });
             }
 
+            // Fetch profile to get role and other info
+            const profile = await UserModel.findById(data.user.id);
+
+            // Merge profile data with auth user
+            const userWithProfile = {
+                id: data.user.id,
+                email: data.user.email,
+                ...profile,
+                is_verified: !!data.user.email_confirmed_at,
+                user_metadata: data.user.user_metadata
+            };
+
+            console.log('🔐 Login successful - User role:', userWithProfile.role);
+
             res.status(200).json({
                 success: true,
                 message: 'Đăng nhập thành công',
                 data: {
-                    user: data.user,
+                    user: userWithProfile,
                     session: data.session,
                     token: data.session.access_token
                 }
@@ -332,12 +346,22 @@ class AuthController {
             // First check profiles table
             const profile = await UserModel.findById(user.id);
 
+            console.log('🔍 DEBUG getProfile:');
+            console.log('- User ID:', user.id);
+            console.log('- Profile from DB:', profile);
+            console.log('- Profile role:', profile?.role);
+
             // Merge auth metadata if profile is partial?
+            // IMPORTANT: profile data should override user data
             const finalData = {
-                ...user,
-                ...profile,
-                user_metadata: user.user_metadata // Ensure we have raw metadata
+                id: user.id,
+                email: user.email,
+                ...profile, // This will include role from profiles table
+                is_verified: !!user.email_confirmed_at,
+                user_metadata: user.user_metadata
             };
+
+            console.log('- Final data role:', finalData.role);
 
             res.status(200).json({
                 success: true,

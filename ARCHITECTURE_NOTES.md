@@ -1,8 +1,5 @@
 # Kiến trúc Hệ thống & Xác thực Xpiano
 
-User ID: `b3b0383d-cead-4920-bec1-25a4b7293cb3`
-Updated: 2026-02-09
-
 ## 1. Cơ chế Lưu trữ User đồng bộ
 
 Để đảm bảo tính nhất quán giữa Web App và Mobile App, thông tin người dùng được lưu trữ song song tại 3 vị trí, với `auth.users` của Supabase là nguồn gốc (Source of Truth) cho Authentication.
