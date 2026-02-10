@@ -12,7 +12,7 @@ class FavoriteController {
                 .from('favorites')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category, price_per_hour, rating)
+                    piano:pianos(id, name, image_url, category, price_per_day, price, rating)
                 `)
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
