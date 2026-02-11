@@ -111,6 +111,31 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/upload', uploadRoutes);
 
+// Health check endpoint (for monitoring/Render)
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'OK', 
+        message: 'Xpiano API is running',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({ 
+        message: '🎹 Welcome to Xpiano API',
+        version: '1.0.0',
+        endpoints: {
+            pianos: '/api/pianos',
+            teachers: '/api/teacher',
+            auth: '/api/auth',
+            users: '/api/users',
+            health: '/health'
+        }
+    });
+});
+
 // Error handlers (must be last)
 app.use(notFoundHandler);
 app.use(errorHandler);
