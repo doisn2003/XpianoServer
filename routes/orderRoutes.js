@@ -8,6 +8,7 @@ router.get('/my-orders', authenticate, OrderController.getMyOrders);
 router.get('/active-rentals', authenticate, OrderController.getMyActiveRentals);
 router.post('/', authenticate, OrderController.createOrder);
 router.post('/:id/cancel', authenticate, OrderController.cancelOrder);
+router.get('/:id/status', authenticate, OrderController.getOrderStatus); // New: Check payment status
 
 // Admin routes
 router.get('/stats', authenticate, authorize('admin'), OrderController.getOrderStats);

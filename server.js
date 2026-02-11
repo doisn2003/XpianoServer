@@ -7,6 +7,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const teacherRoutes = require('./routes/teacherRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const OrderController = require('./controllers/orderController');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
 const app = express();
@@ -111,6 +112,9 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/upload', uploadRoutes);
 
+// SePay Webhook endpoint (public - no auth required for bank webhooks)
+app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);
+
 // Health check endpoint (for monitoring/Render)
 app.get('/health', (req, res) => {
     res.status(200).json({ 
@@ -153,6 +157,13 @@ app.listen(PORT, () => {
   ║                                       ║
   ╚═══════════════════════════════════════╝
   `);
+
+    // Start cron job: Cancel expired QR orders every minute
+    setInterval(() => {
+        OrderController.cancelExpiredOrders();
+    }, 60 * 1000); // Run every 60 seconds
+
+    console.log('⏰ Cron job started: Auto-cancel expired QR orders (every 60s)');
 });
 
 module.exports = app;
