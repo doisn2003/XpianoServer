@@ -296,7 +296,9 @@ class AuthController {
                 data: {
                     user: userWithProfile,
                     session: data.session,
-                    token: data.session.access_token
+                    token: data.session.access_token,
+                    refresh_token: data.session.refresh_token,
+                    expires_at: data.session.expires_at
                 }
             });
 
@@ -494,7 +496,9 @@ class AuthController {
                 data: {
                     user: { ...data.user, role: userRole },
                     session: data.session,
-                    token: data.session.access_token
+                    token: data.session.access_token,
+                    refresh_token: data.session.refresh_token,
+                    expires_at: data.session.expires_at
                 }
             });
 
@@ -612,6 +616,49 @@ class AuthController {
             res.status(200).json({ success: true, message: 'Đổi mật khẩu thành công' });
         } catch (error) {
             res.status(500).json({ success: false, message: error.message });
+        }
+    }
+
+    // POST /api/auth/refresh - Refresh access token
+    static async refreshToken(req, res) {
+        try {
+            const { refresh_token } = req.body;
+            
+            if (!refresh_token) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Refresh token is required'
+                });
+            }
+
+            const { data, error } = await supabase.auth.refreshSession({
+                refresh_token
+            });
+
+            if (error) {
+                console.error('Token refresh error:', error);
+                return res.status(401).json({
+                    success: false,
+                    message: 'Refresh token không hợp lệ hoặc đã hết hạn'
+                });
+            }
+
+            res.status(200).json({
+                success: true,
+                message: 'Token refreshed successfully',
+                data: {
+                    token: data.session.access_token,
+                    refresh_token: data.session.refresh_token,
+                    expires_at: data.session.expires_at
+                }
+            });
+        } catch (error) {
+            console.error('Error refreshing token:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Lỗi khi làm mới token',
+                error: error.message
+            });
         }
     }
 }
