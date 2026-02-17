@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
     throw new Error('Missing Supabase URL or Key in environment variables');
@@ -12,11 +13,17 @@ console.log('Supabase Check - URL:', supabaseUrl);
 // Enhanced logging to debug RLS
 try {
     const payload = JSON.parse(atob(supabaseKey.split('.')[1]));
-    console.log('Supabase Check - Key Role:', payload.role);
+    console.log('Supabase Check - Anon Key Role:', payload.role);
+
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        const servicePayload = JSON.parse(atob(process.env.SUPABASE_SERVICE_ROLE_KEY.split('.')[1]));
+        console.log('Supabase Check - Service Key Role:', servicePayload.role);
+    } else {
+        console.warn('⚠️ WARNING: SUPABASE_SERVICE_ROLE_KEY is missing. Admin operations may fail if SUPABASE_KEY is not a service_role key.');
+    }
 } catch (e) {
     console.log('Supabase Check - Could not decode key');
 }
-console.log('Supabase Check - Is Service Role:', supabaseKey && supabaseKey.includes('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') ? 'Likely Yes' : 'Unknown');
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
     auth: {
@@ -27,7 +34,7 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 // Admin client strictly for database operations that need to bypass RLS
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
         autoRefreshToken: false,
         persistSession: false,
