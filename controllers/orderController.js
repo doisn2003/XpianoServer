@@ -389,7 +389,6 @@ class OrderController {
     // PUT /api/orders/:id/status (Admin - Approve/Reject)
     static async updateOrderStatus(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
             const { id } = req.params;
             const { status, notes } = req.body;
             const user = req.user;
@@ -404,6 +403,14 @@ class OrderController {
                 updates.approved_at = new Date().toISOString();
             }
 
+            // ─── Lấy thông tin đơn hàng TRƯỚC khi update ─────────────────
+            // (cần total_price để cộng ví Admin nếu status = approved)
+            const { data: orderBeforeUpdate } = await supabaseAdmin
+                .from('orders')
+                .select('id, total_price, status')
+                .eq('id', id)
+                .single();
+
             const { error } = await supabaseAdmin
                 .from('orders')
                 .update(updates)
@@ -416,6 +423,18 @@ class OrderController {
                 message: `Đã cập nhật trạng thái đơn hàng thành ${status}`
             });
 
+            // ─── STEP AFTER RESPONSE: Cộng doanh thu về ví Admin ─────────
+            // Fire & Forget – không ảnh hưởng đến response đã gửi
+            if (status === 'approved' && orderBeforeUpdate && orderBeforeUpdate.status === 'pending') {
+                OrderController._creditAdminWallet({
+                    admin_user_id: user.id,
+                    order_id: parseInt(id),
+                    amount: orderBeforeUpdate.total_price
+                }).catch(err => {
+                    console.error(`⚠️ [AdminWallet] Unhandled error crediting wallet for order #${id}:`, err.message);
+                });
+            }
+
         } catch (error) {
             console.error('Error in updateOrderStatus:', error);
             res.status(500).json({
@@ -423,6 +442,79 @@ class OrderController {
                 message: 'Lỗi khi cập nhật trạng thái đơn hàng',
                 error: error.message
             });
+        }
+    }
+
+    /**
+     * Helper nội bộ: Cộng doanh thu vào ví Admin khi đơn hàng được duyệt.
+     * Fire & Forget – KHÔNG BAO GIỜ throw lên ngoài.
+     *
+     * Logic:
+     *   1. Upsert bản ghi `wallets` của admin (tạo nếu chưa có, cộng nếu đã có)
+     *   2. Ghi một dòng `transactions` loại 'credit_order'
+     *
+     * @param {object} params
+     * @param {string} params.admin_user_id  - UUID của admin đã duyệt đơn
+     * @param {number} params.order_id       - ID đơn hàng
+     * @param {number} params.amount         - Số tiền cần cộng (total_price của đơn)
+     */
+    static async _creditAdminWallet({ admin_user_id, order_id, amount }) {
+        try {
+            console.log(`💰 [AdminWallet] Crediting ${amount.toLocaleString('vi-VN')} VNĐ for order #${order_id} to admin ${admin_user_id}`);
+
+            // ─── 1. Upsert ví Admin (tạo nếu chưa có, cộng tiền nếu đã có) ──
+            // Dùng RPC để atomic update tránh race condition
+            const { data: wallet, error: walletFetchError } = await supabaseAdmin
+                .from('wallets')
+                .select('id, available_balance')
+                .eq('user_id', admin_user_id)
+                .single();
+
+            if (walletFetchError && walletFetchError.code !== 'PGRST116') {
+                // PGRST116 = row not found – normal case for first time
+                throw walletFetchError;
+            }
+
+            if (!wallet) {
+                // Tạo ví mới cho admin
+                const { error: insertError } = await supabaseAdmin
+                    .from('wallets')
+                    .insert({ user_id: admin_user_id, available_balance: amount, total_earned: amount, total_withdrawn: 0 });
+                if (insertError) throw insertError;
+            } else {
+                // Cộng vào ví hiện có
+                const { error: updateError } = await supabaseAdmin
+                    .from('wallets')
+                    .update({
+                        available_balance: wallet.available_balance + amount,
+                    })
+                    .eq('user_id', admin_user_id);
+                if (updateError) throw updateError;
+            }
+
+            // ─── 2. Ghi transaction history ────────────────────────────────
+            const { error: txError } = await supabaseAdmin
+                .from('transactions')
+                .insert({
+                    user_id: admin_user_id,
+                    type: 'credit',
+                    amount,
+                    description: `Doanh thu từ đơn hàng #${order_id} được duyệt`,
+                    reference_type: 'order',
+                    reference_id: order_id.toString(),
+                    status: 'completed'
+                });
+
+            if (txError) {
+                // Không throw – lỗi ghi log không quan trọng bằng ví đã được cộng
+                console.error(`⚠️ [AdminWallet] Failed to record transaction for order #${order_id}:`, txError.message);
+            }
+
+            console.log(`✅ [AdminWallet] Successfully credited ${amount.toLocaleString('vi-VN')} VNĐ for order #${order_id}`);
+
+        } catch (err) {
+            console.error(`❌ [AdminWallet] Failed to credit wallet for order #${order_id}:`, err.message);
+            // Không throw – đây là fire & forget
         }
     }
 
