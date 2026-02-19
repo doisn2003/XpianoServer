@@ -7,6 +7,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const teacherRoutes = require('./routes/teacherRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const walletRoutes = require('./routes/walletRoutes');
 const OrderController = require('./controllers/orderController');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
@@ -26,7 +27,7 @@ app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
-        
+
         // Check if origin is allowed
         const isAllowed = allowedOrigins.some(allowed => {
             if (allowed instanceof RegExp) {
@@ -34,7 +35,7 @@ app.use(cors({
             }
             return allowed === origin;
         });
-        
+
         if (isAllowed) {
             callback(null, true);
         } else {
@@ -111,14 +112,15 @@ app.use('/api/favorites', require('./routes/favoriteRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/wallet', walletRoutes);
 
 // SePay Webhook endpoint (public - no auth required for bank webhooks)
 app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);
 
 // Health check endpoint (for monitoring/Render)
 app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'OK', 
+    res.status(200).json({
+        status: 'OK',
         message: 'Xpiano API is running',
         timestamp: new Date().toISOString(),
         uptime: process.uptime()
@@ -127,7 +129,7 @@ app.get('/health', (req, res) => {
 
 // Root endpoint
 app.get('/', (req, res) => {
-    res.json({ 
+    res.json({
         message: '🎹 Welcome to Xpiano API',
         version: '1.0.0',
         endpoints: {
