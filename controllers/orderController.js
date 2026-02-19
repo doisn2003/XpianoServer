@@ -25,7 +25,7 @@ class OrderController {
         const bankAccount = process.env.BANK_ACCOUNT || '0365408910';
         const bankName = process.env.BANK_NAME || 'MB';
         const description = `DH${orderId}`;
-        
+
         return `https://qr.sepay.vn/img?bank=${bankName}&acc=${bankAccount}&template=compact&amount=${amount}&des=${description}`;
     }
 
@@ -56,18 +56,24 @@ class OrderController {
                 </p>
             </div>
         `;
-        
+
         return await sendEmail(userEmail, subject, html);
     }
 
     // POST /api/orders
     static async createOrder(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
             const user = req.user;
-            const { piano_id, type, rental_start_date, rental_end_date, payment_method = 'COD' } = req.body;
+            const {
+                piano_id,
+                type,
+                rental_start_date,
+                rental_end_date,
+                payment_method = 'COD',
+                affiliate_ref   // ← Tiếp nhận mã giới thiệu từ frontend
+            } = req.body;
 
-            // 1. Get piano details (Use supabaseAdmin to bypass RLS)
+            // ─── STEP 1: Lấy thông tin đàn ───────────────────────────────
             const { data: piano, error: pianoError } = await supabaseAdmin
                 .from('pianos')
                 .select('price_per_day, price')
@@ -81,7 +87,7 @@ class OrderController {
                 });
             }
 
-            // 2. Calculate price and days
+            // ─── STEP 2: Tính giá ─────────────────────────────────────────
             let totalPrice;
             let rentalDays = null;
 
@@ -109,7 +115,7 @@ class OrderController {
                 totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
             }
 
-            // 3. Validate payment_method
+            // ─── STEP 3: Validate payment_method ─────────────────────────
             if (!['COD', 'QR'].includes(payment_method)) {
                 return res.status(400).json({
                     success: false,
@@ -117,12 +123,12 @@ class OrderController {
                 });
             }
 
-            // 4. Calculate payment expiry (60 minutes from now for QR)
-            const paymentExpiredAt = payment_method === 'QR' 
+            // ─── STEP 4: Tính payment expiry (60 phút cho QR) ────────────
+            const paymentExpiredAt = payment_method === 'QR'
                 ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
                 : null;
 
-            // 5. Create Order (Use supabaseAdmin to bypass RLS)
+            // ─── STEP 5: Tạo đơn hàng (ưu tiên số 1) ────────────────────
             const { data: order, error } = await supabaseAdmin
                 .from('orders')
                 .insert({
@@ -142,7 +148,7 @@ class OrderController {
 
             if (error) throw error;
 
-            // 6. Prepare response based on payment method
+            // ─── STEP 6: Chuẩn bị response dựa theo payment_method ───────
             const responseData = {
                 ...order,
                 qr_url: null,
@@ -160,13 +166,30 @@ class OrderController {
                 };
             }
 
+            // ─── STEP 7: TRẢ VỀ RESPONSE NGAY cho khách ─────────────────
+            // Đây là ưu tiên số 1 – khách đã đặt hàng thành công
             res.status(201).json({
                 success: true,
-                message: payment_method === 'QR' 
+                message: payment_method === 'QR'
                     ? 'Đơn hàng đã tạo. Vui lòng thanh toán trong 60 phút.'
                     : 'Đặt hàng thành công',
                 data: responseData
             });
+
+            // ─── STEP 8: Xử lý Affiliate (FIRE & FORGET – KHÔNG chặn response) ──
+            // Nguyên tắc: Nếu bước này lỗi, khách KHÔNG bị ảnh hưởng.
+            // Toàn bộ lỗi chỉ được log ra console, không throw lên trên.
+            if (affiliate_ref && typeof affiliate_ref === 'string' && affiliate_ref.trim().length > 0) {
+                OrderController._processAffiliateCommission({
+                    affiliate_ref: affiliate_ref.trim().toUpperCase(),
+                    buyer_user_id: user.id,
+                    order_id: order.id,
+                    total_price: totalPrice
+                }).catch(err => {
+                    // Đảm bảo promise không unhandled
+                    console.error(`⚠️ [Affiliate] Unhandled error for order #${order.id}:`, err.message);
+                });
+            }
 
         } catch (error) {
             console.error('Error in createOrder:', error);
@@ -177,6 +200,76 @@ class OrderController {
             });
         }
     }
+
+    /**
+     * Helper nội bộ: Tạo commission cho affiliate sau khi đơn hàng được tạo thành công.
+     * Đây là hàm PRIVATE, chỉ dùng trong class này.
+     * Được thiết kế để KHÔNG BAO GIỜ throw lên ngoài – mọi lỗi đều được catch và log.
+     *
+     * @param {object} params
+     * @param {string} params.affiliate_ref     - Mã giới thiệu từ localStorage của khách
+     * @param {string} params.buyer_user_id     - ID của người mua hàng (để chống gian lận tự giới thiệu)
+     * @param {number} params.order_id          - ID đơn hàng vừa tạo
+     * @param {number} params.total_price       - Giá trị đơn hàng (để tính commission)
+     */
+    static async _processAffiliateCommission({ affiliate_ref, buyer_user_id, order_id, total_price }) {
+        try {
+            console.log(`🔗 [Affiliate] Processing commission for ref="${affiliate_ref}", order #${order_id}`);
+
+            // ─── Tìm affiliate theo referral_code ────────────────────────
+            const { data: affiliate, error: affiliateError } = await supabaseAdmin
+                .from('affiliates')
+                .select('id, user_id, commission_rate, status')
+                .eq('referral_code', affiliate_ref)
+                .eq('status', 'active')  // Chỉ affiliate đang active mới nhận hoa hồng
+                .single();
+
+            if (affiliateError || !affiliate) {
+                console.log(`ℹ️ [Affiliate] Ref="${affiliate_ref}" not found or inactive. No commission created.`);
+                return; // Không lỗi, chỉ không có affiliate hợp lệ
+            }
+
+            // ─── Chống gian lận: Không cho tự giới thiệu chính mình ──────
+            if (affiliate.user_id === buyer_user_id) {
+                console.warn(`🚨 [Affiliate] FRAUD DETECTED: User ${buyer_user_id} tried to self-refer with code "${affiliate_ref}". Commission blocked.`);
+                return;
+            }
+
+            // ─── Tính tiền hoa hồng ───────────────────────────────────────
+            // commission_amount = total_price * commission_rate (VD: 10% của đơn hàng)
+            const commissionAmount = Math.round(total_price * parseFloat(affiliate.commission_rate));
+
+            if (commissionAmount <= 0) {
+                console.log(`ℹ️ [Affiliate] Commission amount is 0 for order #${order_id}. Skipping.`);
+                return;
+            }
+
+            // ─── Insert commission với status 'pending' ───────────────────
+            // Status 'pending' → Admin sẽ duyệt thủ công bằng approve_commission RPC
+            const { error: insertError } = await supabaseAdmin
+                .from('commissions')
+                .insert({
+                    affiliate_id: affiliate.id,
+                    amount: commissionAmount,
+                    reference_type: 'order_piano',
+                    reference_id: order_id.toString(),
+                    status: 'pending',
+                    note: `Hoa hồng từ đơn hàng #${order_id} (${(parseFloat(affiliate.commission_rate) * 100).toFixed(0)}% × ${total_price.toLocaleString('vi-VN')} VNĐ)`
+                });
+
+            if (insertError) {
+                console.error(`❌ [Affiliate] Failed to insert commission for order #${order_id}:`, insertError.message);
+                return;
+            }
+
+            console.log(`✅ [Affiliate] Commission created: ${commissionAmount.toLocaleString('vi-VN')} VNĐ for affiliate ${affiliate.id} (ref: ${affiliate_ref}), order #${order_id}`);
+
+        } catch (err) {
+            // Đảm bảo KHÔNG bao giờ crash server hay ảnh hưởng đơn hàng
+            console.error(`❌ [Affiliate] Unexpected error processing commission for order #${order_id}:`, err.message);
+        }
+    }
+
 
     // GET /api/orders/my-orders
     static async getMyOrders(req, res) {
@@ -515,7 +608,7 @@ class OrderController {
 
             if (receivedAmount < expectedAmount) {
                 console.log(`❌ Amount mismatch for Order #${orderId}: received ${receivedAmount}, expected ${expectedAmount}`);
-                
+
                 // Update order with payment_failed status
                 await supabaseAdmin
                     .from('orders')
@@ -595,7 +688,7 @@ class OrderController {
     static async cancelExpiredOrders() {
         try {
             const now = new Date().toISOString();
-            
+
             // Find and update expired pending QR orders
             const { data: expiredOrders, error: selectError } = await supabaseAdmin
                 .from('orders')

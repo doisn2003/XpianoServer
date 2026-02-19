@@ -8,6 +8,7 @@ const userRoutes = require('./routes/userRoutes');
 const teacherRoutes = require('./routes/teacherRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const walletRoutes = require('./routes/walletRoutes');
+const affiliateRoutes = require('./routes/affiliateRoutes');
 const OrderController = require('./controllers/orderController');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
 
@@ -113,6 +114,7 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/wallet', walletRoutes);
+app.use('/api/affiliate', affiliateRoutes);
 
 // SePay Webhook endpoint (public - no auth required for bank webhooks)
 app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);
