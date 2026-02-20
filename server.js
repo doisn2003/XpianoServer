@@ -125,6 +125,7 @@ app.use('/api/posts', require('./routes/postRoutes'));
 app.use('/api/social', require('./routes/socialRoutes'));
 app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/sessions', require('./routes/sessionRoutes'));
 
 // SePay Webhook endpoint (public - no auth required for bank webhooks)
 app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);

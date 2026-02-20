@@ -181,6 +181,54 @@ function initSocket(httpServer) {
                 .eq('user_id', userId);
         });
 
+        // ---- SESSION ROOMS (Classroom) ----
+        socket.on('join_session', async (sessionId) => {
+            // Verify participant
+            const { data: participant } = await supabaseAdmin
+                .from('session_participants')
+                .select('id')
+                .eq('session_id', sessionId)
+                .eq('user_id', userId)
+                .is('left_at', null)
+                .single();
+
+            if (participant) {
+                socket.join(`session:${sessionId}`);
+            }
+        });
+
+        socket.on('session_chat_msg', async (data, callback) => {
+            try {
+                const { session_id, message, message_type } = data;
+                if (!session_id || !message?.trim()) return callback?.({ error: 'Missing data' });
+
+                const { data: msg, error } = await supabaseAdmin
+                    .from('session_chat')
+                    .insert({
+                        session_id,
+                        user_id: userId,
+                        message: message.trim(),
+                        message_type: message_type || 'text'
+                    })
+                    .select('*')
+                    .single();
+
+                if (error) return callback?.({ error: error.message });
+
+                const { data: profile } = await supabaseAdmin
+                    .from('profiles')
+                    .select('id, full_name, avatar_url, role')
+                    .eq('id', userId)
+                    .single();
+
+                const enriched = { ...msg, author: profile || { id: userId } };
+                io.to(`session:${session_id}`).emit('session_chat', enriched);
+                callback?.({ success: true, data: enriched });
+            } catch (err) {
+                callback?.({ error: err.message });
+            }
+        });
+
         socket.on('disconnect', () => {
             console.log(`🔌 Socket disconnected: ${userId}`);
         });
