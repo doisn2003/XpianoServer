@@ -354,4 +354,57 @@ SocialController.getTeacherReviews = async (req, res) => {
     }
 };
 
+// ============================================================================
+// TEACHERS LIST (Suggested teachers for sidebar)
+// ============================================================================
+
+/**
+ * GET /api/social/teachers - Get list of teachers for suggestions
+ */
+SocialController.getTeachersList = async (req, res) => {
+    try {
+        const { data: teachers, error } = await supabaseAdmin
+            .from('users')
+            .select('id, full_name, avatar_url, role')
+            .eq('role', 'teacher')
+            .limit(10);
+
+        if (error) throw error;
+
+        res.json({ success: true, data: teachers || [] });
+    } catch (error) {
+        console.error('Get teachers list error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách giáo viên', error: error.message });
+    }
+};
+
+// ============================================================================
+// USER SEARCH (for new conversation)
+// ============================================================================
+
+/**
+ * GET /api/social/users/search?q=keyword - Search users by name
+ */
+SocialController.searchUsers = async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || String(q).trim().length < 2) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const { data: users, error } = await supabaseAdmin
+            .from('users')
+            .select('id, full_name, avatar_url, role')
+            .ilike('full_name', `%${String(q).trim()}%`)
+            .limit(20);
+
+        if (error) throw error;
+
+        res.json({ success: true, data: users || [] });
+    } catch (error) {
+        console.error('Search users error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi tìm kiếm người dùng', error: error.message });
+    }
+};
+
 module.exports = SocialController;
