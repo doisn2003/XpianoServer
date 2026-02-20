@@ -115,6 +115,8 @@ app.use('/api/teacher', teacherRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/affiliate', affiliateRoutes);
+app.use('/api/posts', require('./routes/postRoutes'));
+app.use('/api/social', require('./routes/socialRoutes'));
 
 // SePay Webhook endpoint (public - no auth required for bank webhooks)
 app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);

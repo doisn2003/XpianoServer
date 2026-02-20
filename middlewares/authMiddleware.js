@@ -63,5 +63,29 @@ const authorize = (...roles) => {
     };
 };
 
-module.exports = { authenticate, authorize };
+/**
+ * Optional authentication - attaches user if token present, continues regardless.
+ * Useful for public endpoints where we want to personalize (e.g. is_liked).
+ */
+const optionalAuthenticate = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            req.user = null;
+            return next();
+        }
+
+        const token = authHeader.split(' ')[1];
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+
+        req.user = error ? null : user;
+        req.token = error ? null : token;
+        next();
+    } catch (error) {
+        req.user = null;
+        next();
+    }
+};
+
+module.exports = { authenticate, authorize, optionalAuthenticate };
 
