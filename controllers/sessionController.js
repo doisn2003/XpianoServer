@@ -275,20 +275,32 @@ SessionController.startSession = async (req, res) => {
 
         if (error) throw error;
 
-        // Generate LiveKit token for teacher (can publish multiple tracks)
+        // Fetch room config for teacher permissions
+        const { data: roomConfig } = await supabaseAdmin
+            .from('session_room_config')
+            .select('teacher_config')
+            .eq('session_id', sessionId)
+            .single();
+
         const profileMap = await fetchProfiles([teacherId]);
         const teacherName = profileMap[teacherId]?.full_name || 'Teacher';
 
-        const token = await livekit.generateToken(
+        const token = await livekit.generateTeacherToken(
             session.room_id,
             teacherId,
             teacherName,
-            {
-                canPublish: true,
-                canSubscribe: true,
-                metadata: { role: 'teacher', session_id: sessionId }
-            }
+            sessionId,
+            roomConfig?.teacher_config
         );
+
+        // Auto-create default room config if not exists
+        if (!roomConfig) {
+            await supabaseAdmin
+                .from('session_room_config')
+                .insert({ session_id: sessionId })
+                .select()
+                .single();
+        }
 
         // Add teacher as participant
         await supabaseAdmin
@@ -310,7 +322,8 @@ SessionController.startSession = async (req, res) => {
                     token,
                     url: livekit.LIVEKIT_URL,
                     room_id: session.room_id
-                }
+                },
+                room_config: roomConfig?.teacher_config || livekit.DEFAULT_TEACHER_CONFIG
             }
         });
     } catch (error) {
@@ -357,21 +370,26 @@ SessionController.joinSession = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Buổi học đã đầy' });
         }
 
-        // Generate LiveKit token for student
+        // Fetch room config for role-specific permissions
+        const { data: roomConfig } = await supabaseAdmin
+            .from('session_room_config')
+            .select('teacher_config, student_config')
+            .eq('session_id', sessionId)
+            .single();
+
         const profileMap = await fetchProfiles([userId]);
         const userName = profileMap[userId]?.full_name || 'Student';
         const isTeacher = session.teacher_id === userId;
 
-        const token = await livekit.generateToken(
-            session.room_id,
-            userId,
-            userName,
-            {
-                canPublish: isTeacher,   // students can't publish by default
-                canSubscribe: true,
-                metadata: { role: isTeacher ? 'teacher' : 'student', session_id: sessionId }
-            }
-        );
+        const token = isTeacher
+            ? await livekit.generateTeacherToken(
+                session.room_id, userId, userName, sessionId,
+                roomConfig?.teacher_config
+            )
+            : await livekit.generateStudentToken(
+                session.room_id, userId, userName, sessionId,
+                roomConfig?.student_config
+            );
 
         // Upsert participant record
         await supabaseAdmin
@@ -624,6 +642,252 @@ SessionController.sendChatMessage = async (req, res) => {
     } catch (error) {
         console.error('Send chat error:', error);
         res.status(500).json({ success: false, message: 'Lỗi gửi chat', error: error.message });
+    }
+};
+
+// ============================================================================
+// ROOM CONFIG (Multi-camera permissions per session)
+// ============================================================================
+
+/**
+ * PUT /api/sessions/:id/room-config - Teacher configures room permissions
+ */
+SessionController.configureRoom = async (req, res) => {
+    try {
+        const sessionId = req.params.id;
+        const teacherId = req.user.id;
+        const { teacher_config, student_config, layout_preset } = req.body;
+
+        // Verify ownership
+        const { data: session } = await supabaseAdmin
+            .from('live_sessions')
+            .select('teacher_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (!session || session.teacher_id !== teacherId) {
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+        }
+
+        const updates = {};
+        if (teacher_config) updates.teacher_config = teacher_config;
+        if (student_config) updates.student_config = student_config;
+        if (layout_preset) updates.layout_preset = layout_preset;
+
+        const { data, error } = await supabaseAdmin
+            .from('session_room_config')
+            .upsert({
+                session_id: sessionId,
+                ...updates
+            }, { onConflict: 'session_id' })
+            .select('*')
+            .single();
+
+        if (error) throw error;
+
+        // Broadcast config change to all participants
+        const io = getIO();
+        if (io) {
+            io.to(`session:${sessionId}`).emit('room_config_updated', data);
+        }
+
+        res.json({ success: true, message: 'Cấu hình phòng đã cập nhật', data });
+    } catch (error) {
+        console.error('Configure room error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi cấu hình phòng', error: error.message });
+    }
+};
+
+/**
+ * GET /api/sessions/:id/room-config - Get room configuration
+ */
+SessionController.getRoomConfig = async (req, res) => {
+    try {
+        const sessionId = req.params.id;
+
+        const { data, error } = await supabaseAdmin
+            .from('session_room_config')
+            .select('*')
+            .eq('session_id', sessionId)
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error;
+
+        res.json({
+            success: true,
+            data: data || {
+                teacher_config: livekit.DEFAULT_TEACHER_CONFIG,
+                student_config: livekit.DEFAULT_STUDENT_CONFIG,
+                layout_preset: 'default'
+            }
+        });
+    } catch (error) {
+        console.error('Get room config error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy cấu hình', error: error.message });
+    }
+};
+
+// ============================================================================
+// TRACK METADATA (Multi-camera track management)
+// ============================================================================
+
+/**
+ * POST /api/sessions/:id/tracks - Register a track (teacher publishes camera_face, etc.)
+ */
+SessionController.registerTrack = async (req, res) => {
+    try {
+        const sessionId = req.params.id;
+        const userId = req.user.id;
+        const { track_sid, track_source, label, settings } = req.body;
+
+        if (!track_source) {
+            return res.status(400).json({ success: false, message: 'track_source là bắt buộc' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('session_tracks')
+            .upsert({
+                session_id: sessionId,
+                user_id: userId,
+                track_sid: track_sid || null,
+                track_source,
+                label: label || track_source,
+                is_active: true,
+                settings: settings || {}
+            }, { onConflict: 'session_id,user_id,track_source' })
+            .select('*')
+            .single();
+
+        if (error) {
+            // Fallback: insert without onConflict if composite unique doesn't exist
+            const { data: inserted, error: insertErr } = await supabaseAdmin
+                .from('session_tracks')
+                .insert({
+                    session_id: sessionId,
+                    user_id: userId,
+                    track_sid: track_sid || null,
+                    track_source,
+                    label: label || track_source,
+                    is_active: true,
+                    settings: settings || {}
+                })
+                .select('*')
+                .single();
+            if (insertErr) throw insertErr;
+
+            const profileMap = await fetchProfiles([userId]);
+            const enriched = { ...inserted, user: profileMap[userId] || { id: userId } };
+
+            const io = getIO();
+            if (io) {
+                io.to(`session:${sessionId}`).emit('track_registered', enriched);
+            }
+
+            return res.status(201).json({ success: true, data: enriched });
+        }
+
+        const profileMap = await fetchProfiles([userId]);
+        const enriched = { ...data, user: profileMap[userId] || { id: userId } };
+
+        // Broadcast track registration
+        const io = getIO();
+        if (io) {
+            io.to(`session:${sessionId}`).emit('track_registered', enriched);
+        }
+
+        res.status(201).json({ success: true, data: enriched });
+    } catch (error) {
+        console.error('Register track error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi đăng ký track', error: error.message });
+    }
+};
+
+/**
+ * GET /api/sessions/:id/tracks - Get all active tracks for a session
+ */
+SessionController.getTracks = async (req, res) => {
+    try {
+        const sessionId = req.params.id;
+
+        const { data: tracks, error } = await supabaseAdmin
+            .from('session_tracks')
+            .select('*')
+            .eq('session_id', sessionId)
+            .eq('is_active', true)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        const userIds = [...new Set(tracks.map(t => t.user_id))];
+        const profileMap = await fetchProfiles(userIds);
+
+        const enriched = tracks.map(t => ({
+            ...t,
+            user: profileMap[t.user_id] || { id: t.user_id }
+        }));
+
+        res.json({ success: true, data: enriched });
+    } catch (error) {
+        console.error('Get tracks error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy tracks', error: error.message });
+    }
+};
+
+/**
+ * PUT /api/sessions/:id/tracks/:trackId - Update a track (e.g. deactivate, change label)
+ */
+SessionController.updateTrack = async (req, res) => {
+    try {
+        const { id: sessionId, trackId } = req.params;
+        const userId = req.user.id;
+        const { track_sid, label, is_active, settings } = req.body;
+
+        // Verify ownership (track owner or session teacher)
+        const { data: track } = await supabaseAdmin
+            .from('session_tracks')
+            .select('user_id, session_id')
+            .eq('id', trackId)
+            .single();
+
+        if (!track) {
+            return res.status(404).json({ success: false, message: 'Track không tồn tại' });
+        }
+
+        const { data: session } = await supabaseAdmin
+            .from('live_sessions')
+            .select('teacher_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (track.user_id !== userId && session?.teacher_id !== userId) {
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+        }
+
+        const updates = {};
+        if (track_sid !== undefined) updates.track_sid = track_sid;
+        if (label !== undefined) updates.label = label;
+        if (is_active !== undefined) updates.is_active = is_active;
+        if (settings !== undefined) updates.settings = settings;
+
+        const { data, error } = await supabaseAdmin
+            .from('session_tracks')
+            .update(updates)
+            .eq('id', trackId)
+            .select('*')
+            .single();
+
+        if (error) throw error;
+
+        // Broadcast track update
+        const io = getIO();
+        if (io) {
+            io.to(`session:${sessionId}`).emit('track_updated', data);
+        }
+
+        res.json({ success: true, data });
+    } catch (error) {
+        console.error('Update track error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi cập nhật track', error: error.message });
     }
 };
 

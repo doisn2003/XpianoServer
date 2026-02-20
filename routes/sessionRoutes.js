@@ -26,4 +26,13 @@ router.get('/:id/participants', authenticate, SessionController.getParticipants)
 router.get('/:id/chat', authenticate, SessionController.getChatHistory);
 router.post('/:id/chat', authenticate, SessionController.sendChatMessage);
 
+// Room config (multi-camera permissions)
+router.get('/:id/room-config', authenticate, SessionController.getRoomConfig);
+router.put('/:id/room-config', authenticate, SessionController.configureRoom);
+
+// Track metadata (multi-camera tracks)
+router.get('/:id/tracks', authenticate, SessionController.getTracks);
+router.post('/:id/tracks', authenticate, SessionController.registerTrack);
+router.put('/:id/tracks/:trackId', authenticate, SessionController.updateTrack);
+
 module.exports = router;
