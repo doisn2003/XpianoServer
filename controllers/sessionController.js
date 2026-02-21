@@ -381,6 +381,19 @@ SessionController.joinSession = async (req, res) => {
         const userName = profileMap[userId]?.full_name || 'Student';
         const isTeacher = session.teacher_id === userId;
 
+        if (!isTeacher && session.course_id) {
+            const { data: enrollment } = await supabaseAdmin
+                .from('course_enrollments')
+                .select('id')
+                .eq('course_id', session.course_id)
+                .eq('user_id', userId)
+                .eq('status', 'active')
+                .single();
+            if (!enrollment) {
+                return res.status(403).json({ success: false, message: 'Bạn chưa đăng ký khóa học này' });
+            }
+        }
+
         const token = isTeacher
             ? await livekit.generateTeacherToken(
                 session.room_id, userId, userName, sessionId,

@@ -272,7 +272,7 @@ SocialController.getTeacherPublicProfile = async (req, res) => {
             .from('courses')
             .select('id', { count: 'exact', head: true })
             .eq('teacher_id', teacherId)
-            .eq('status', 'active');
+            .eq('status', 'published');
 
         // Get total students
         const { data: courses } = await supabaseAdmin
@@ -324,7 +324,7 @@ SocialController.getTeacherCourses = async (req, res) => {
             .from('courses')
             .select('*')
             .eq('teacher_id', teacherId)
-            .eq('status', 'active')
+            .eq('status', 'published')
             .order('created_at', { ascending: false })
             .limit(limit + 1);
 

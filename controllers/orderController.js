@@ -1,5 +1,6 @@
 const { supabase, supabaseAdmin } = require('../utils/supabaseClient');
 const sendEmail = require('../utils/emailService');
+const pool = require('../config/database');
 
 class OrderController {
     // Helper: Calculate rental price (based on price per day)
@@ -66,6 +67,7 @@ class OrderController {
             const user = req.user;
             const {
                 piano_id,
+                course_id,
                 type,
                 rental_start_date,
                 rental_end_date,
@@ -73,46 +75,51 @@ class OrderController {
                 affiliate_ref   // ← Tiếp nhận mã giới thiệu từ frontend
             } = req.body;
 
-            // ─── STEP 1: Lấy thông tin đàn ───────────────────────────────
-            const { data: piano, error: pianoError } = await supabaseAdmin
-                .from('pianos')
-                .select('price_per_day, price')
-                .eq('id', piano_id)
-                .single();
-
-            if (pianoError || !piano) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy đàn'
-                });
-            }
-
-            // ─── STEP 2: Tính giá ─────────────────────────────────────────
+            // ─── STEP 1: Lấy thông tin sản phẩm (Đàn hoặc Khóa học) ───────────────────────────────
             let totalPrice;
             let rentalDays = null;
 
-            if (type === 'rent') {
-                if (!rental_start_date || !rental_end_date) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Vui lòng chọn ngày thuê'
-                    });
-                }
-
-                const startDate = new Date(rental_start_date);
-                const endDate = new Date(rental_end_date);
-                rentalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-                if (rentalDays < 1) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Thời gian thuê phải ít nhất 1 ngày'
-                    });
-                }
-
-                totalPrice = OrderController.calculateRentalPrice(piano.price_per_day, rentalDays);
+            if (type === 'course') {
+                if (!course_id) return res.status(400).json({ success: false, message: 'Thiếu course_id' });
+                const { data: course, error: courseError } = await supabaseAdmin
+                    .from('courses').select('price').eq('id', course_id).single();
+                if (courseError || !course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
+                totalPrice = course.price;
             } else {
-                totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
+                if (!piano_id) return res.status(400).json({ success: false, message: 'Thiếu piano_id' });
+                const { data: piano, error: pianoError } = await supabaseAdmin
+                    .from('pianos').select('price_per_day, price').eq('id', piano_id).single();
+
+                if (pianoError || !piano) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Không tìm thấy đàn'
+                    });
+                }
+
+                if (type === 'rent') {
+                    if (!rental_start_date || !rental_end_date) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Vui lòng chọn ngày thuê'
+                        });
+                    }
+
+                    const startDate = new Date(rental_start_date);
+                    const endDate = new Date(rental_end_date);
+                    rentalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+                    if (rentalDays < 1) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Thời gian thuê phải ít nhất 1 ngày'
+                        });
+                    }
+
+                    totalPrice = OrderController.calculateRentalPrice(piano.price_per_day, rentalDays);
+                } else {
+                    totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
+                }
             }
 
             // ─── STEP 3: Validate payment_method ─────────────────────────
@@ -133,7 +140,8 @@ class OrderController {
                 .from('orders')
                 .insert({
                     user_id: user.id,
-                    piano_id,
+                    piano_id: piano_id || null,
+                    course_id: course_id || null,
                     type,
                     total_price: totalPrice,
                     rental_start_date: rental_start_date || null,
@@ -567,6 +575,7 @@ class OrderController {
                 totalRevenue: orders.filter(o => o.status === 'approved').reduce((sum, o) => sum + o.total_price, 0),
                 buyOrders: orders.filter(o => o.type === 'buy').length,
                 rentOrders: orders.filter(o => o.type === 'rent').length,
+                courseOrders: orders.filter(o => o.type === 'course').length,
             };
 
             res.status(200).json({
@@ -672,7 +681,8 @@ class OrderController {
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(name)
+                    piano:pianos(name),
+                    course:courses(title, teacher_id)
                 `)
                 .eq('id', orderId)
                 .single();
@@ -729,6 +739,61 @@ class OrderController {
             }
 
             console.log(`✅ Order #${orderId} payment confirmed!`);
+
+            // ─── XỬ LÝ ĐẶC THÙ CHO KHÓA HỌC ───
+            if (order.type === 'course' && order.course_id) {
+                // 1. Thêm course_enrollments
+                await supabaseAdmin
+                    .from('course_enrollments')
+                    .insert({
+                        course_id: order.course_id,
+                        user_id: order.user_id,
+                        order_id: order.id,
+                        status: 'active'
+                    });
+
+                // 2. Phân bổ doanh thu cho giáo viên (80%)
+                if (order.course?.teacher_id) {
+                    const teacherId = order.course.teacher_id;
+                    const platformFeePercentage = 0.20; // Admin giữ 20%
+                    const teacherEarnings = receivedAmount * (1 - platformFeePercentage);
+
+                    try {
+                        const dbClient = await pool.connect();
+                        try {
+                            await dbClient.query('BEGIN');
+                            const walletRes = await dbClient.query(
+                                'UPDATE wallets SET available_balance = available_balance + $1 WHERE user_id = $2 RETURNING id',
+                                [teacherEarnings, teacherId]
+                            );
+                            if (walletRes.rows.length === 0) {
+                                const newW = await dbClient.query(
+                                    'INSERT INTO wallets (user_id, available_balance, locked_balance) VALUES ($1, $2, 0) RETURNING id',
+                                    [teacherId, teacherEarnings]
+                                );
+                                await dbClient.query(
+                                    'INSERT INTO transactions (wallet_id, user_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                                    [newW.rows[0].id, teacherId, 'course_revenue', teacherEarnings, 'order', order.id, `Doanh thu khóa học ${order.course.title}`]
+                                );
+                            } else {
+                                await dbClient.query(
+                                    'INSERT INTO transactions (wallet_id, user_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                                    [walletRes.rows[0].id, teacherId, 'course_revenue', teacherEarnings, 'order', order.id, `Doanh thu khóa học ${order.course.title}`]
+                                );
+                            }
+                            await dbClient.query('COMMIT');
+                            console.log(`✅ Đã cộng ${teacherEarnings} vào ví giáo viên ${teacherId}`);
+                        } catch (txErr) {
+                            await dbClient.query('ROLLBACK');
+                            throw txErr;
+                        } finally {
+                            dbClient.release();
+                        }
+                    } catch (walletErr) {
+                        console.error('Lỗi khi cộng tiền vào ví giáo viên:', walletErr);
+                    }
+                }
+            }
 
             // Get user email for notification
             const { data: profile } = await supabaseAdmin
