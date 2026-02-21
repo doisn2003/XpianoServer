@@ -113,7 +113,7 @@ app.get('/', (req, res) => {
     });
 });
 
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/pianos', pianoRoutes);
 app.use('/api/favorites', require('./routes/favoriteRoutes'));

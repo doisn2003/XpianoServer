@@ -189,6 +189,53 @@ SocialController.getFollowing = async (req, res) => {
     }
 };
 
+/**
+ * GET /api/users/:id/public - Get basic user public profile
+ */
+SocialController.getUserPublicProfile = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const currentUserId = req.user?.id;
+
+        const { data: profile } = await supabaseAdmin
+            .from('profiles')
+            .select('id, full_name, avatar_url, role, followers_count, following_count')
+            .eq('id', userId)
+            .single();
+
+        if (!profile) {
+            return res.status(404).json({ success: false, message: 'Người dùng không tồn tại' });
+        }
+
+        let isFollowing = false;
+        if (currentUserId && currentUserId !== userId) {
+            const { data: follow } = await supabaseAdmin
+                .from('follows')
+                .select('id')
+                .eq('follower_id', currentUserId)
+                .eq('following_id', userId)
+                .single();
+            isFollowing = !!follow;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                profile: profile,
+                stats: {
+                    followers_count: profile.followers_count || 0,
+                    following_count: profile.following_count || 0
+                },
+                isTeacher: profile.role === 'teacher',
+                is_following: isFollowing
+            }
+        });
+    } catch (error) {
+        console.error('Get user public profile error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy hồ sơ người dùng', error: error.message });
+    }
+};
+
 // ============================================================================
 // TEACHER PUBLIC PROFILE
 // ============================================================================
@@ -364,7 +411,7 @@ SocialController.getTeacherReviews = async (req, res) => {
 SocialController.getTeachersList = async (req, res) => {
     try {
         const { data: teachers, error } = await supabaseAdmin
-            .from('users')
+            .from('profiles')
             .select('id, full_name, avatar_url, role')
             .eq('role', 'teacher')
             .limit(10);
@@ -388,14 +435,15 @@ SocialController.getTeachersList = async (req, res) => {
 SocialController.searchUsers = async (req, res) => {
     try {
         const { q } = req.query;
-        if (!q || String(q).trim().length < 2) {
+        const queryStr = String(q || '').trim();
+        if (!queryStr || queryStr.length < 2) {
             return res.json({ success: true, data: [] });
         }
 
         const { data: users, error } = await supabaseAdmin
-            .from('users')
-            .select('id, full_name, avatar_url, role')
-            .ilike('full_name', `%${String(q).trim()}%`)
+            .from('profiles')
+            .select('id, full_name, avatar_url, role, phone, email')
+            .or(`full_name.ilike.%${queryStr}%,phone.ilike.%${queryStr}%,email.ilike.%${queryStr}%`)
             .limit(20);
 
         if (error) throw error;

@@ -12,6 +12,7 @@ router.delete('/users/:id/follow', authenticate, SocialController.unfollowUser);
 router.get('/users/search', authenticate, SocialController.searchUsers);  // MUST be before :id routes
 router.get('/users/:id/followers', optionalAuthenticate, SocialController.getFollowers);
 router.get('/users/:id/following', optionalAuthenticate, SocialController.getFollowing);
+router.get('/users/:id/public', optionalAuthenticate, SocialController.getUserPublicProfile);
 
 // ============================================================================
 // TEACHER PUBLIC PROFILE
