@@ -277,18 +277,51 @@ class AuthController {
             }
 
             // Fetch profile to get role and other info
-            const profile = await UserModel.findById(data.user.id);
+            let profile = await UserModel.findById(data.user.id);
+
+            // If profile is missing (e.g. wiped DB), restore it from Auth Metadata
+            if (!profile) {
+                console.log('⚠️ Profile missing for user. Restoring from Auth Metadata...');
+                const metadata = data.user.user_metadata || {};
+
+                // Construct profile data
+                const newProfile = {
+                    id: data.user.id,
+                    email: data.user.email,
+                    full_name: metadata.full_name || '',
+                    phone: metadata.phone || '',
+                    role: metadata.role || 'user',
+                    avatar_url: metadata.avatar_url || ''
+                };
+
+                // Insert into public.profiles via SQL
+                try {
+                    await pool.query(
+                        `INSERT INTO profiles (id, full_name, phone, role, avatar_url, email)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (id) DO NOTHING`,
+                        [newProfile.id, newProfile.full_name, newProfile.phone, newProfile.role, newProfile.avatar_url, newProfile.email]
+                    );
+                    profile = newProfile; // Use the restored profile
+                    console.log('✅ Profile restored successfully.');
+                } catch (restorError) {
+                    console.error('❌ Failed to restore profile:', restorError);
+                    // Fallback to basic object if write fails
+                    profile = newProfile;
+                }
+            }
 
             // Merge profile data with auth user
             const userWithProfile = {
                 id: data.user.id,
                 email: data.user.email,
                 ...profile,
+                role: profile.role, // Explicitly use role from profile
                 is_verified: !!data.user.email_confirmed_at,
                 user_metadata: data.user.user_metadata
             };
 
-            console.log('🔐 Login successful - User role:', userWithProfile.role);
+            console.log(`🔐 Login successful - User: ${data.user.email} - Role: ${userWithProfile.role}`);
 
             res.status(200).json({
                 success: true,
@@ -415,10 +448,10 @@ class AuthController {
             const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
                 user.id,
                 {
-                    user_metadata: { 
-                        full_name, 
-                        phone, 
-                        date_of_birth 
+                    user_metadata: {
+                        full_name,
+                        phone,
+                        date_of_birth
                     }
                 }
             );
@@ -623,7 +656,7 @@ class AuthController {
     static async refreshToken(req, res) {
         try {
             const { refresh_token } = req.body;
-            
+
             if (!refresh_token) {
                 return res.status(400).json({
                     success: false,

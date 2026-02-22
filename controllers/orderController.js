@@ -1,5 +1,6 @@
 const { supabase, supabaseAdmin } = require('../utils/supabaseClient');
 const sendEmail = require('../utils/emailService');
+const pool = require('../config/database');
 
 class OrderController {
     // Helper: Calculate rental price (based on price per day)
@@ -25,7 +26,7 @@ class OrderController {
         const bankAccount = process.env.BANK_ACCOUNT || '0365408910';
         const bankName = process.env.BANK_NAME || 'MB';
         const description = `DH${orderId}`;
-        
+
         return `https://qr.sepay.vn/img?bank=${bankName}&acc=${bankAccount}&template=compact&amount=${amount}&des=${description}`;
     }
 
@@ -56,60 +57,72 @@ class OrderController {
                 </p>
             </div>
         `;
-        
+
         return await sendEmail(userEmail, subject, html);
     }
 
     // POST /api/orders
     static async createOrder(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
             const user = req.user;
-            const { piano_id, type, rental_start_date, rental_end_date, payment_method = 'COD' } = req.body;
+            const {
+                piano_id,
+                course_id,
+                type,
+                rental_start_date,
+                rental_end_date,
+                payment_method = 'COD',
+                affiliate_ref   // ← Tiếp nhận mã giới thiệu từ frontend
+            } = req.body;
 
-            // 1. Get piano details (Use supabaseAdmin to bypass RLS)
-            const { data: piano, error: pianoError } = await supabaseAdmin
-                .from('pianos')
-                .select('price_per_day, price')
-                .eq('id', piano_id)
-                .single();
-
-            if (pianoError || !piano) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Không tìm thấy đàn'
-                });
-            }
-
-            // 2. Calculate price and days
+            // ─── STEP 1: Lấy thông tin sản phẩm (Đàn hoặc Khóa học) ───────────────────────────────
             let totalPrice;
             let rentalDays = null;
 
-            if (type === 'rent') {
-                if (!rental_start_date || !rental_end_date) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Vui lòng chọn ngày thuê'
-                    });
-                }
-
-                const startDate = new Date(rental_start_date);
-                const endDate = new Date(rental_end_date);
-                rentalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-                if (rentalDays < 1) {
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Thời gian thuê phải ít nhất 1 ngày'
-                    });
-                }
-
-                totalPrice = OrderController.calculateRentalPrice(piano.price_per_day, rentalDays);
+            if (type === 'course') {
+                if (!course_id) return res.status(400).json({ success: false, message: 'Thiếu course_id' });
+                const { data: course, error: courseError } = await supabaseAdmin
+                    .from('courses').select('price').eq('id', course_id).single();
+                if (courseError || !course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
+                totalPrice = course.price;
             } else {
-                totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
+                if (!piano_id) return res.status(400).json({ success: false, message: 'Thiếu piano_id' });
+                const { data: piano, error: pianoError } = await supabaseAdmin
+                    .from('pianos').select('price_per_day, price').eq('id', piano_id).single();
+
+                if (pianoError || !piano) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Không tìm thấy đàn'
+                    });
+                }
+
+                if (type === 'rent') {
+                    if (!rental_start_date || !rental_end_date) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Vui lòng chọn ngày thuê'
+                        });
+                    }
+
+                    const startDate = new Date(rental_start_date);
+                    const endDate = new Date(rental_end_date);
+                    rentalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+                    if (rentalDays < 1) {
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Thời gian thuê phải ít nhất 1 ngày'
+                        });
+                    }
+
+                    totalPrice = OrderController.calculateRentalPrice(piano.price_per_day, rentalDays);
+                } else {
+                    totalPrice = OrderController.calculateBuyPrice(piano.price, piano.price_per_day);
+                }
             }
 
-            // 3. Validate payment_method
+            // ─── STEP 3: Validate payment_method ─────────────────────────
             if (!['COD', 'QR'].includes(payment_method)) {
                 return res.status(400).json({
                     success: false,
@@ -117,17 +130,18 @@ class OrderController {
                 });
             }
 
-            // 4. Calculate payment expiry (60 minutes from now for QR)
-            const paymentExpiredAt = payment_method === 'QR' 
+            // ─── STEP 4: Tính payment expiry (60 phút cho QR) ────────────
+            const paymentExpiredAt = payment_method === 'QR'
                 ? new Date(Date.now() + 60 * 60 * 1000).toISOString()
                 : null;
 
-            // 5. Create Order (Use supabaseAdmin to bypass RLS)
+            // ─── STEP 5: Tạo đơn hàng (ưu tiên số 1) ────────────────────
             const { data: order, error } = await supabaseAdmin
                 .from('orders')
                 .insert({
                     user_id: user.id,
-                    piano_id,
+                    piano_id: piano_id || null,
+                    course_id: course_id || null,
                     type,
                     total_price: totalPrice,
                     rental_start_date: rental_start_date || null,
@@ -142,7 +156,7 @@ class OrderController {
 
             if (error) throw error;
 
-            // 6. Prepare response based on payment method
+            // ─── STEP 6: Chuẩn bị response dựa theo payment_method ───────
             const responseData = {
                 ...order,
                 qr_url: null,
@@ -160,13 +174,30 @@ class OrderController {
                 };
             }
 
+            // ─── STEP 7: TRẢ VỀ RESPONSE NGAY cho khách ─────────────────
+            // Đây là ưu tiên số 1 – khách đã đặt hàng thành công
             res.status(201).json({
                 success: true,
-                message: payment_method === 'QR' 
+                message: payment_method === 'QR'
                     ? 'Đơn hàng đã tạo. Vui lòng thanh toán trong 60 phút.'
                     : 'Đặt hàng thành công',
                 data: responseData
             });
+
+            // ─── STEP 8: Xử lý Affiliate (FIRE & FORGET – KHÔNG chặn response) ──
+            // Nguyên tắc: Nếu bước này lỗi, khách KHÔNG bị ảnh hưởng.
+            // Toàn bộ lỗi chỉ được log ra console, không throw lên trên.
+            if (affiliate_ref && typeof affiliate_ref === 'string' && affiliate_ref.trim().length > 0) {
+                OrderController._processAffiliateCommission({
+                    affiliate_ref: affiliate_ref.trim().toUpperCase(),
+                    buyer_user_id: user.id,
+                    order_id: order.id,
+                    total_price: totalPrice
+                }).catch(err => {
+                    // Đảm bảo promise không unhandled
+                    console.error(`⚠️ [Affiliate] Unhandled error for order #${order.id}:`, err.message);
+                });
+            }
 
         } catch (error) {
             console.error('Error in createOrder:', error);
@@ -177,6 +208,76 @@ class OrderController {
             });
         }
     }
+
+    /**
+     * Helper nội bộ: Tạo commission cho affiliate sau khi đơn hàng được tạo thành công.
+     * Đây là hàm PRIVATE, chỉ dùng trong class này.
+     * Được thiết kế để KHÔNG BAO GIỜ throw lên ngoài – mọi lỗi đều được catch và log.
+     *
+     * @param {object} params
+     * @param {string} params.affiliate_ref     - Mã giới thiệu từ localStorage của khách
+     * @param {string} params.buyer_user_id     - ID của người mua hàng (để chống gian lận tự giới thiệu)
+     * @param {number} params.order_id          - ID đơn hàng vừa tạo
+     * @param {number} params.total_price       - Giá trị đơn hàng (để tính commission)
+     */
+    static async _processAffiliateCommission({ affiliate_ref, buyer_user_id, order_id, total_price }) {
+        try {
+            console.log(`🔗 [Affiliate] Processing commission for ref="${affiliate_ref}", order #${order_id}`);
+
+            // ─── Tìm affiliate theo referral_code ────────────────────────
+            const { data: affiliate, error: affiliateError } = await supabaseAdmin
+                .from('affiliates')
+                .select('id, user_id, commission_rate, status')
+                .eq('referral_code', affiliate_ref)
+                .eq('status', 'active')  // Chỉ affiliate đang active mới nhận hoa hồng
+                .single();
+
+            if (affiliateError || !affiliate) {
+                console.log(`ℹ️ [Affiliate] Ref="${affiliate_ref}" not found or inactive. No commission created.`);
+                return; // Không lỗi, chỉ không có affiliate hợp lệ
+            }
+
+            // ─── Chống gian lận: Không cho tự giới thiệu chính mình ──────
+            if (affiliate.user_id === buyer_user_id) {
+                console.warn(`🚨 [Affiliate] FRAUD DETECTED: User ${buyer_user_id} tried to self-refer with code "${affiliate_ref}". Commission blocked.`);
+                return;
+            }
+
+            // ─── Tính tiền hoa hồng ───────────────────────────────────────
+            // commission_amount = total_price * commission_rate (VD: 10% của đơn hàng)
+            const commissionAmount = Math.round(total_price * parseFloat(affiliate.commission_rate));
+
+            if (commissionAmount <= 0) {
+                console.log(`ℹ️ [Affiliate] Commission amount is 0 for order #${order_id}. Skipping.`);
+                return;
+            }
+
+            // ─── Insert commission với status 'pending' ───────────────────
+            // Status 'pending' → Admin sẽ duyệt thủ công bằng approve_commission RPC
+            const { error: insertError } = await supabaseAdmin
+                .from('commissions')
+                .insert({
+                    affiliate_id: affiliate.id,
+                    amount: commissionAmount,
+                    reference_type: 'order_piano',
+                    reference_id: order_id.toString(),
+                    status: 'pending',
+                    note: `Hoa hồng từ đơn hàng #${order_id} (${(parseFloat(affiliate.commission_rate) * 100).toFixed(0)}% × ${total_price.toLocaleString('vi-VN')} VNĐ)`
+                });
+
+            if (insertError) {
+                console.error(`❌ [Affiliate] Failed to insert commission for order #${order_id}:`, insertError.message);
+                return;
+            }
+
+            console.log(`✅ [Affiliate] Commission created: ${commissionAmount.toLocaleString('vi-VN')} VNĐ for affiliate ${affiliate.id} (ref: ${affiliate_ref}), order #${order_id}`);
+
+        } catch (err) {
+            // Đảm bảo KHÔNG bao giờ crash server hay ảnh hưởng đơn hàng
+            console.error(`❌ [Affiliate] Unexpected error processing commission for order #${order_id}:`, err.message);
+        }
+    }
+
 
     // GET /api/orders/my-orders
     static async getMyOrders(req, res) {
@@ -296,7 +397,6 @@ class OrderController {
     // PUT /api/orders/:id/status (Admin - Approve/Reject)
     static async updateOrderStatus(req, res) {
         try {
-            // const supabase = getSupabaseClient(req); // Use global for Service Role
             const { id } = req.params;
             const { status, notes } = req.body;
             const user = req.user;
@@ -311,6 +411,13 @@ class OrderController {
                 updates.approved_at = new Date().toISOString();
             }
 
+            // ─── Lấy thông tin đơn hàng TRƯỚC khi update ─────────────────
+            const { data: orderBeforeUpdate } = await supabaseAdmin
+                .from('orders')
+                .select('id, total_price, status, type, course_id, user_id')
+                .eq('id', id)
+                .single();
+
             const { error } = await supabaseAdmin
                 .from('orders')
                 .update(updates)
@@ -323,6 +430,28 @@ class OrderController {
                 message: `Đã cập nhật trạng thái đơn hàng thành ${status}`
             });
 
+            // ─── STEP AFTER RESPONSE: Xử lý theo loại đơn hàng ─────────
+            // Fire & Forget – không ảnh hưởng đến response đã gửi
+            if (status === 'approved' && orderBeforeUpdate && orderBeforeUpdate.status === 'pending') {
+                if (orderBeforeUpdate.type === 'course') {
+                    OrderController._processCourseApproval({
+                        order_id: parseInt(id),
+                        course_id: orderBeforeUpdate.course_id,
+                        user_id: orderBeforeUpdate.user_id,
+                        received_amount: orderBeforeUpdate.total_price,
+                        payment_method: 'COD'
+                    }).catch(err => console.error(`⚠️ [CourseApproval] Unhandled error:`, err.message));
+                } else {
+                    OrderController._creditAdminWallet({
+                        admin_user_id: user.id,
+                        order_id: parseInt(id),
+                        amount: orderBeforeUpdate.total_price
+                    }).catch(err => {
+                        console.error(`⚠️ [AdminWallet] Unhandled error crediting wallet:`, err.message);
+                    });
+                }
+            }
+
         } catch (error) {
             console.error('Error in updateOrderStatus:', error);
             res.status(500).json({
@@ -330,6 +459,153 @@ class OrderController {
                 message: 'Lỗi khi cập nhật trạng thái đơn hàng',
                 error: error.message
             });
+        }
+    }
+
+    /**
+     * Helper nội bộ: Cộng doanh thu vào ví Admin khi đơn hàng được duyệt.
+     * Fire & Forget – KHÔNG BAO GIỜ throw lên ngoài.
+     *
+     * Logic:
+     *   1. Upsert bản ghi `wallets` của admin (tạo nếu chưa có, cộng nếu đã có)
+     *   2. Ghi một dòng `transactions` loại 'credit_order'
+     *
+     * @param {object} params
+     * @param {string} params.admin_user_id  - UUID của admin đã duyệt đơn
+     * @param {number} params.order_id       - ID đơn hàng
+     * @param {number} params.amount         - Số tiền cần cộng (total_price của đơn)
+     */
+    static async _creditAdminWallet({ admin_user_id, order_id, amount }) {
+        try {
+            console.log(`💰 [AdminWallet] Crediting ${amount.toLocaleString('vi-VN')} VNĐ for order #${order_id} to admin ${admin_user_id}`);
+
+            // ─── 1. Upsert ví Admin (tạo nếu chưa có, cộng tiền nếu đã có) ──
+            // Dùng RPC để atomic update tránh race condition
+            const { data: wallet, error: walletFetchError } = await supabaseAdmin
+                .from('wallets')
+                .select('id, available_balance')
+                .eq('user_id', admin_user_id)
+                .single();
+
+            if (walletFetchError && walletFetchError.code !== 'PGRST116') {
+                // PGRST116 = row not found – normal case for first time
+                throw walletFetchError;
+            }
+
+            if (!wallet) {
+                // Tạo ví mới cho admin
+                const { error: insertError } = await supabaseAdmin
+                    .from('wallets')
+                    .insert({ user_id: admin_user_id, available_balance: amount, total_earned: amount, total_withdrawn: 0 });
+                if (insertError) throw insertError;
+            } else {
+                // Cộng vào ví hiện có
+                const { error: updateError } = await supabaseAdmin
+                    .from('wallets')
+                    .update({
+                        available_balance: wallet.available_balance + amount,
+                    })
+                    .eq('user_id', admin_user_id);
+                if (updateError) throw updateError;
+            }
+
+            // ─── 2. Ghi transaction history ────────────────────────────────
+            const { error: txError } = await supabaseAdmin
+                .from('transactions')
+                .insert({
+                    user_id: admin_user_id,
+                    type: 'credit',
+                    amount,
+                    description: `Doanh thu từ đơn hàng #${order_id} được duyệt`,
+                    reference_type: 'order',
+                    reference_id: order_id.toString(),
+                    status: 'completed'
+                });
+
+            if (txError) {
+                // Không throw – lỗi ghi log không quan trọng bằng ví đã được cộng
+                console.error(`⚠️ [AdminWallet] Failed to record transaction for order #${order_id}:`, txError.message);
+            }
+
+            console.log(`✅ [AdminWallet] Successfully credited ${amount.toLocaleString('vi-VN')} VNĐ for order #${order_id}`);
+
+        } catch (err) {
+            console.error(`❌ [AdminWallet] Failed to credit wallet for order #${order_id}:`, err.message);
+            // Không throw – đây là fire & forget
+        }
+    }
+
+    /**
+     * Helper nội bộ: Xử lý ghi danh khóa học và chia tiền cho giáo viên
+     */
+    static async _processCourseApproval({ order_id, course_id, user_id, received_amount, payment_method }) {
+        let dbClient = null;
+        try {
+            console.log(`🎓 [CourseApproval] Processing course enrollment for order #${order_id}`);
+
+            // 1. Fetch course info
+            const { data: course, error: courseError } = await supabaseAdmin
+                .from('courses')
+                .select('title, teacher_id')
+                .eq('id', course_id)
+                .single();
+
+            if (courseError || !course) throw new Error('Course not found');
+
+            dbClient = await pool.connect();
+            await dbClient.query('BEGIN');
+
+            // 2. Thêm course_enrollments (dùng UPSERT SQL thuần để vượt qua lỗi cache Supabase JS)
+            const enrollSql = `
+                INSERT INTO course_enrollments (course_id, user_id, order_id, status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (course_id, user_id)
+                DO UPDATE SET
+                    order_id = EXCLUDED.order_id,
+                    status = EXCLUDED.status
+            `;
+            await dbClient.query(enrollSql, [
+                course_id,
+                user_id,
+                order_id,
+                'active'
+            ]);
+
+            // 3. Phân bổ doanh thu cho giáo viên (80%)
+            if (course.teacher_id) {
+                const teacherId = course.teacher_id;
+                const platformFeePercentage = 0.20; // Admin giữ 20%
+                const teacherEarnings = received_amount * (1 - platformFeePercentage);
+
+                const walletRes = await dbClient.query(
+                    'UPDATE wallets SET available_balance = available_balance + $1 WHERE user_id = $2 RETURNING id',
+                    [teacherEarnings, teacherId]
+                );
+                if (walletRes.rows.length === 0) {
+                    const newW = await dbClient.query(
+                        'INSERT INTO wallets (user_id, available_balance, locked_balance) VALUES ($1, $2, 0) RETURNING id',
+                        [teacherId, teacherEarnings]
+                    );
+                    await dbClient.query(
+                        'INSERT INTO transactions (wallet_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6)',
+                        [newW.rows[0].id, 'IN', teacherEarnings, 'course_fee', order_id.toString(), `Doanh thu khóa học ${course.title}`]
+                    );
+                } else {
+                    await dbClient.query(
+                        'INSERT INTO transactions (wallet_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6)',
+                        [walletRes.rows[0].id, 'IN', teacherEarnings, 'course_fee', order_id.toString(), `Doanh thu khóa học ${course.title}`]
+                    );
+                }
+                console.log(`✅ [CourseApproval] Đã cộng ${teacherEarnings} vào ví giáo viên ${teacherId}`);
+            }
+
+            await dbClient.query('COMMIT');
+
+        } catch (err) {
+            if (dbClient) await dbClient.query('ROLLBACK');
+            console.error(`❌ [CourseApproval] Lỗi xử lý khóa học cho order #${order_id}:`, err.message);
+        } finally {
+            if (dbClient) dbClient.release();
         }
     }
 
@@ -382,6 +658,7 @@ class OrderController {
                 totalRevenue: orders.filter(o => o.status === 'approved').reduce((sum, o) => sum + o.total_price, 0),
                 buyOrders: orders.filter(o => o.type === 'buy').length,
                 rentOrders: orders.filter(o => o.type === 'rent').length,
+                courseOrders: orders.filter(o => o.type === 'course').length,
             };
 
             res.status(200).json({
@@ -487,7 +764,8 @@ class OrderController {
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(name)
+                    piano:pianos(name),
+                    course:courses(title, teacher_id)
                 `)
                 .eq('id', orderId)
                 .single();
@@ -515,7 +793,7 @@ class OrderController {
 
             if (receivedAmount < expectedAmount) {
                 console.log(`❌ Amount mismatch for Order #${orderId}: received ${receivedAmount}, expected ${expectedAmount}`);
-                
+
                 // Update order with payment_failed status
                 await supabaseAdmin
                     .from('orders')
@@ -544,6 +822,28 @@ class OrderController {
             }
 
             console.log(`✅ Order #${orderId} payment confirmed!`);
+
+            // ─── XỬ LÝ ĐẶC THÙ CHO KHÓA HỌC / ĐÀN ───
+            if (order.type === 'course' && order.course_id) {
+                await OrderController._processCourseApproval({
+                    order_id: orderId,
+                    course_id: order.course_id,
+                    user_id: order.user_id,
+                    received_amount: receivedAmount,
+                    payment_method: 'QR'
+                });
+            } else {
+                // For Piano buys/rents via QR, credit admin wallet.
+                // We need an admin user ID. Let's look up the first admin.
+                const { data: adminUser } = await supabaseAdmin.from('profiles').select('id').eq('role', 'admin').limit(1).single();
+                if (adminUser) {
+                    await OrderController._creditAdminWallet({
+                        admin_user_id: adminUser.id,
+                        order_id: orderId,
+                        amount: receivedAmount
+                    });
+                }
+            }
 
             // Get user email for notification
             const { data: profile } = await supabaseAdmin
@@ -595,7 +895,7 @@ class OrderController {
     static async cancelExpiredOrders() {
         try {
             const now = new Date().toISOString();
-            
+
             // Find and update expired pending QR orders
             const { data: expiredOrders, error: selectError } = await supabaseAdmin
                 .from('orders')
