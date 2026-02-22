@@ -1,7 +1,10 @@
 # Tài liệu API (API Documentation) cho Đội ngũ Flutter
-Phiên bản: 2.0.0
+Phiên bản: 2.1.0
+Ngày cập nhật: 22/02/2026
 
 Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano, được nhóm theo các tính năng logic để đội ngũ Frontend (Flutter Mobile App) dễ dàng theo dõi và tích hợp.
+
+**Tổng số API endpoints: 140**
 
 ## Thông tin chung
 - **Base URL (Local):** `http://<YOUR_LOCAL_IP>:3000/api` (Dùng IP của máy tính thay vì localhost cho Mobile Device)
@@ -23,7 +26,9 @@ Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano,
 5. Mạng xã hội, Bài viết & Tin nhắn (Social, Posts & Messages)
 6. Giáo viên & Tiếp thị liên kết (Teacher Profile & Affiliate)
 7. Tệp đính kèm & Thông báo (Uploads & Notifications)
-8. Quản trị, Phân tích & Kiểm duyệt (Admin, Analytics & Moderation)
+8. Quản trị, Phân tích, Kiểm duyệt & Báo cáo (Admin, Analytics & Moderation)
+
+**Tổng số API trong hệ thống: 140 endpoints**
 
 ---
 
@@ -87,6 +92,7 @@ Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano,
 - `POST /api/courses` : Tạo khóa học mới.
 - `PUT /api/courses/:id` : Chỉnh sửa nội dung khóa học.
 - `POST /api/courses/:id/publish` : Phát hành (xuất bản) khóa học sau khi soạn xong.
+- `GET /api/courses/admin/stats` : Thống kê tổng quan khóa học (Yêu cầu Auth, Admin only).
 
 ### Phiên học Livestream (Sessions)
 - `GET /api/sessions` : Danh sách toàn bộ lịch Live Sessions (Tùy chọn Auth).
@@ -120,12 +126,22 @@ Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano,
 - `POST /api/orders/:id/cancel` : Hủy đơn hàng.
 - `GET /api/orders/:id/status` : Kiểm tra trạng thái thanh toán đơn hàng.
 
+*Admin endpoints (Yêu cầu Admin Role):*
+- `GET /api/orders/stats` : Thống kê tổng quan đơn hàng.
+- `GET /api/orders` : Danh sách tất cả đơn hàng (Admin).
+- `PUT /api/orders/:id/status` : Cập nhật trạng thái đơn hàng thủ công (Admin).
+
 ### Webhook tự động nhận tiền (No Auth)
 - `POST /api/sepay-webhook` : Dùng cho SePay Webhook tự động cập nhật Status Đơn hàng & nạp tiền hệ thống, Client không cần gọi.
 
 ### Ví nội bộ (Wallet - Yêu cầu Auth)
 - `GET /api/wallet/my-wallet` : Lấy số dư ví của tài khoản thực dùng & lịch sử giao dịch.
 - `POST /api/wallet/withdraw` : Tạo yêu cầu Rút Số dư ví ra ngân hàng cá nhân.
+
+*Admin endpoints (Yêu cầu Admin Role):*
+- `GET /api/wallet/admin/requests` : Lấy danh sách yêu cầu rút tiền đang pending.
+- `POST /api/wallet/admin/process-request` : Xử lý yêu cầu rút tiền (approve/reject).
+- `POST /api/wallet/admin/add-funds` : Nạp tiền thủ công vào ví user.
 
 ---
 
@@ -184,6 +200,11 @@ Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano,
 - `POST /api/affiliate/register` : Yêu cầu cấp mã tiếp thị cho bản thân.
 - `GET /api/affiliate/me` : Điểm thưởng kiếm được, % hoa hồng, thống kê số lượng mời.
 
+*Admin endpoints (Yêu cầu Admin Role):*
+- `GET /api/affiliate/admin/commissions` : Lấy danh sách commissions toàn hệ thống.
+- `POST /api/affiliate/admin/approve-commission` : Duyệt hoa hồng và chuyển tiền tự động.
+- `POST /api/affiliate/admin/create-commission` : Tạo hoa hồng thủ công cho referral code.
+
 ---
 
 ## 7. Các tiện ích khác (Uploads & Notifications)
@@ -203,15 +224,63 @@ Tài liệu này tổng hợp toàn bộ các API Backend của dự án Xpiano,
 ---
 
 ## 8. Quản trị & Hệ thống (Admin Only) (Chủ yếu dành cho web Dashboard, nhưng app có thể tích hợp nếu cần)
+
+### Quản lý User (User Management - Admin only)
+**Base Path:** `/api/users`
 **Yêu cầu Auth & Role: Admin**
-- Danh sách Users (`GET, POST, PUT, DELETE /api/users`)
-- Chấp nhận rút tiền (`GET, POST /api/wallet/admin/*`)
-- Duyệt giáo viên (`GET, PUT /api/users/teacher-profiles/*`)
-- Cấu hình chi phí Affiliate (`GET, POST /api/affiliate/admin/*`)
-- Dashboards Thống kê tổng (`GET /api/admin/dashboard`)
-- Quản lý Post vi phạm (`DELETE /api/admin/posts/:id`, comment)
-- Phân tích User / Chấm dứt Livestream Sessions bạo lực (`DELETE /api/admin/sessions/:id`)
-- Nhận tố cáo / Report User App (`POST, GET, PUT /api/moderation/*`)
+- `GET /api/users/stats` : Thống kê tổng quan về users.
+- `GET /api/users` : Danh sách tất cả users.
+- `GET /api/users/:id` : Chi tiết một user.
+- `POST /api/users` : Tạo user mới (Admin).
+- `PUT /api/users/:id` : Cập nhật thông tin user.
+- `DELETE /api/users/:id` : Xóa user.
+
+*Quản lý Teacher Profiles:*
+- `GET /api/users/teacher-profiles` : Danh sách hồ sơ giáo viên đang chờ duyệt.
+- `PUT /api/users/teacher-profiles/:id/approve` : Phê duyệt giáo viên.
+- `PUT /api/users/teacher-profiles/:id/reject` : Từ chối hồ sơ.
+- `PUT /api/users/teacher-profiles/:id/revoke` : Thu hồi quyền giáo viên.
+
+### Admin Dashboard & Content Moderation
+**Base Path:** `/api/admin`
+**Yêu cầu Auth & Role: Admin**
+- `GET /api/admin/dashboard` : Trang tổng quan, dashboard thống kê toàn hệ thống.
+- `GET /api/admin/users` : Danh sách users để quản lý.
+- `GET /api/admin/users/:id` : Chi tiết user.
+- `GET /api/admin/posts` : Danh sách bài viết để kiểm duyệt.
+- `DELETE /api/admin/posts/:id` : Xóa bài viết vi phạm.
+- `DELETE /api/admin/comments/:id` : Xóa comment vi phạm.
+- `GET /api/admin/sessions` : Danh sách các phiên livestream.
+- `DELETE /api/admin/sessions/:id` : Chấm dứt phiên livestream (nếu có nội dung không phù hợp).
+
+### Analytics & Reporting
+**Base Path:** `/api/analytics`
+**Yêu cầu Auth**
+
+*Theo dõi phiên học (Session Analytics):*
+- `POST /api/analytics/sessions/:sessionId/join` : Ghi nhận user join session.
+- `PUT /api/analytics/sessions/:sessionId/leave` : Ghi nhận user leave session.
+- `GET /api/analytics/sessions/:sessionId` : Xem phân tích của một session (thời gian, attendance, etc).
+
+*Session Recordings:*
+- `POST /api/analytics/sessions/:sessionId/recordings` : Lưu thông tin recording.
+- `GET /api/analytics/sessions/:sessionId/recordings` : Lấy danh sách recordings của session.
+
+*User Learning Statistics:*
+- `GET /api/analytics/users/me` : Thống kê học tập của bản thân.
+- `GET /api/analytics/users/:userId` : Xem thống kê học tập của user khác (Teacher/Admin).
+
+### Moderation & Reports
+**Base Path:** `/api/moderation`
+
+*User-facing (Yêu cầu Auth):*
+- `POST /api/moderation/reports` : Gửi báo cáo vi phạm (report user/post/comment).
+- `GET /api/moderation/reports/mine` : Xem các báo cáo mình đã gửi.
+
+*Admin-only (Yêu cầu Auth & Admin Role):*
+- `GET /api/moderation/admin/reports` : Danh sách tất cả báo cáo đang chờ xử lý.
+- `PUT /api/moderation/admin/reports/:id` : Xem xét và xử lý báo cáo.
+- `GET /api/moderation/admin/stats` : Thống kê về moderation.
 
 ---
 **Hướng dẫn Dành cho AI Agent Phát Triển Flutter:**
