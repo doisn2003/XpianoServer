@@ -307,21 +307,48 @@ class TeacherController {
                 .select('courses!inner(teacher_id)', { count: 'exact', head: true })
                 .eq('courses.teacher_id', userId);
 
-            // Get total revenue (placeholder)
+            // Get total revenue & monthly chart data
             const { data: enrollments } = await supabaseAdmin
                 .from('course_enrollments')
-                .select('amount_paid, courses!inner(teacher_id)')
+                .select('created_at, courses!inner(teacher_id, price)')
                 .eq('courses.teacher_id', userId)
-                .eq('payment_status', 'paid');
+                .eq('status', 'active');
 
-            const totalRevenue = enrollments?.reduce((sum, e) => sum + (e.amount_paid || 0), 0) || 0;
+            let totalRevenue = 0;
+            const last6Months = Array.from({ length: 6 }).map((_, i) => {
+                const d = new Date();
+                d.setMonth(d.getMonth() - i);
+                return {
+                    month: `T${d.getMonth() + 1}`,
+                    yearMonth: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+                    revenue: 0,
+                    students: 0
+                };
+            }).reverse();
+
+            enrollments?.forEach(e => {
+                // Approximate amount paid by assuming they paid the course price
+                const amount = e.courses?.price || 0;
+                totalRevenue += amount;
+
+                if (e.created_at) {
+                    const created = new Date(e.created_at);
+                    const yearMonth = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, '0')}`;
+                    const m = last6Months.find(x => x.yearMonth === yearMonth);
+                    if (m) {
+                        m.revenue += amount;
+                        m.students += 1;
+                    }
+                }
+            });
 
             res.status(200).json({
                 success: true,
                 data: {
                     totalCourses: totalCourses || 0,
                     totalStudents: totalStudents || 0,
-                    totalRevenue
+                    totalRevenue,
+                    chartData: last6Months
                 }
             });
         } catch (error) {

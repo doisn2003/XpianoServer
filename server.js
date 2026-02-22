@@ -1,4 +1,5 @@
-const express = require('express'); // Trigger restart
+const express = require('express');
+const http = require('http');
 const cors = require('cors');
 require('dotenv').config();
 
@@ -11,9 +12,15 @@ const walletRoutes = require('./routes/walletRoutes');
 const affiliateRoutes = require('./routes/affiliateRoutes');
 const OrderController = require('./controllers/orderController');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
+const { authLimiter, uploadLimiter, messageLimiter } = require('./middlewares/rateLimiter');
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
+
+// Initialize Socket.io
+const { initSocket } = require('./socket/socketServer');
+initSocket(server);
 
 // CORS Configuration - Allow production domains
 const allowedOrigins = [
@@ -108,13 +115,23 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/courses', require('./routes/courseRoutes'));
 app.use('/api/pianos', pianoRoutes);
 app.use('/api/favorites', require('./routes/favoriteRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/teacher', teacherRoutes);
-app.use('/api/upload', uploadRoutes);
+app.use('/api/upload', uploadLimiter, uploadRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/affiliate', affiliateRoutes);
+app.use('/api/posts', require('./routes/postRoutes'));
+app.use('/api/social', require('./routes/socialRoutes'));
+app.use('/api/messages', messageLimiter, require('./routes/messageRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/sessions', require('./routes/sessionRoutes'));
+// Phase 5
+app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/moderation', require('./routes/moderationRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 
 // SePay Webhook endpoint (public - no auth required for bank webhooks)
 app.post('/api/sepay-webhook', OrderController.handleSepayWebhook);
@@ -148,8 +165,8 @@ app.get('/', (req, res) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// Start server
-app.listen(PORT, () => {
+// Start server (using http server for Socket.io)
+server.listen(PORT, () => {
     console.log(`
   ╔═══════════════════════════════════════╗
   ║                                       ║
@@ -158,6 +175,7 @@ app.listen(PORT, () => {
   ║   Port: ${PORT}                       ║
   ║   Environment: ${process.env.NODE_ENV || 'development'}              ║
   ║   API: http://localhost:${PORT}       ║
+  ║   Socket.io: ✅ enabled               ║
   ║                                       ║
   ╚═══════════════════════════════════════╝
   `);
@@ -165,7 +183,7 @@ app.listen(PORT, () => {
     // Start cron job: Cancel expired QR orders every minute
     setInterval(() => {
         OrderController.cancelExpiredOrders();
-    }, 60 * 1000); // Run every 60 seconds
+    }, 60 * 1000);
 
     console.log('⏰ Cron job started: Auto-cancel expired QR orders (every 60s)');
 });

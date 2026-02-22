@@ -27,6 +27,13 @@ const UPLOAD_CONFIG = {
         maxSize: MAX_IMAGE_SIZE,
         getPath: (userId, filename) => `${userId}/${filename}`,
     },
+    course_image: {
+        bucket: 'courses',
+        allowedRoles: ['teacher', 'admin'],
+        allowedMimeTypes: ALLOWED_IMAGE_TYPES,
+        maxSize: MAX_IMAGE_SIZE,
+        getPath: (userId, filename) => `images/${userId}/${filename}`,
+    },
     course_video: {
         bucket: 'courses',
         allowedRoles: ['teacher', 'admin'],
