@@ -31,6 +31,11 @@ const allowedOrigins = [
     /^https:\/\/xpiano-.*\.vercel\.app$/ // Allow Vercel preview deployments
 ];
 
+// Allow dynamic frontend URL via Environment Variable required for Production
+if (process.env.FRONTEND_URL) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl)
