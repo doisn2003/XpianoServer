@@ -76,11 +76,11 @@ SessionController.createSession = async (req, res) => {
 
 /**
  * GET /api/sessions - List sessions
- * Query: ?course_id=UUID&status=scheduled&teacher_id=UUID&cursor=ISO&limit=20
+ * Query: ?course_id=UUID&status=scheduled&teacher_id=UUID&cursor=ISO&limit=20&my_schedule=true
  */
 SessionController.getSessions = async (req, res) => {
     try {
-        const { course_id, status, teacher_id } = req.query;
+        const { course_id, status, teacher_id, my_schedule } = req.query;
         const { cursor, limit } = parsePagination(req.query);
 
         let query = supabaseAdmin
@@ -92,6 +92,28 @@ SessionController.getSessions = async (req, res) => {
         if (course_id) query = query.eq('course_id', course_id);
         if (status) query = query.eq('status', status);
         if (teacher_id) query = query.eq('teacher_id', teacher_id);
+
+        // Handle "my_schedule" filter for students
+        if (my_schedule === 'true' && req.user) {
+            // Get all active course IDs for this student
+            const { data: enrollments, error: enrollErr } = await supabaseAdmin
+                .from('course_enrollments')
+                .select('course_id')
+                .eq('user_id', req.user.id)
+                .eq('status', 'active');
+
+            if (enrollErr) throw enrollErr;
+
+            const enrolledCourseIds = enrollments ? enrollments.map(e => e.course_id) : [];
+
+            if (enrolledCourseIds.length > 0) {
+                query = query.in('course_id', enrolledCourseIds);
+            } else {
+                // User has no active courses, return empty result immediately
+                return res.json({ success: true, data: [], hasMore: false });
+            }
+        }
+
         if (cursor) query = query.gt('scheduled_at', cursor);
 
         const { data: sessions, error } = await query;
@@ -123,12 +145,42 @@ SessionController.getSession = async (req, res) => {
 
         const { data: session, error } = await supabaseAdmin
             .from('live_sessions')
-            .select('*')
+            .select(`
+                *,
+                course:courses(
+                    id, title, description, price, teacher_id, 
+                    duration_weeks, sessions_per_week, max_students, current_students,
+                    is_online, status, created_at,
+                    teacher:profiles!courses_teacher_id_fkey(id, full_name, avatar_url, role)
+                )
+            `)
             .eq('id', sessionId)
             .single();
 
         if (error || !session) {
             return res.status(404).json({ success: false, message: 'Buổi học không tồn tại' });
+        }
+
+        // Safely extract the course from the nested select
+        let course = session.course;
+        delete session.course; // Clean up the raw join data
+
+        // Check if current user is enrolled in the session's course
+        let is_enrolled = false;
+        if (course && req.user) {
+            if (req.user.id === course.teacher_id || req.user.role === 'admin') {
+                is_enrolled = true; // Teachers/admins implicitly override
+            } else {
+                const { data: enrollment } = await supabaseAdmin
+                    .from('course_enrollments')
+                    .select('id')
+                    .eq('course_id', course.id)
+                    .eq('user_id', req.user.id)
+                    .eq('status', 'active')
+                    .single();
+
+                is_enrolled = !!enrollment;
+            }
         }
 
         // Get participants count
@@ -145,7 +197,9 @@ SessionController.getSession = async (req, res) => {
             data: {
                 ...session,
                 teacher: profileMap[session.teacher_id] || { id: session.teacher_id },
-                current_participants: participantsCount || 0
+                current_participants: participantsCount || 0,
+                course: course || null,
+                is_enrolled: is_enrolled
             }
         });
     } catch (error) {

@@ -412,10 +412,9 @@ class OrderController {
             }
 
             // ─── Lấy thông tin đơn hàng TRƯỚC khi update ─────────────────
-            // (cần total_price để cộng ví Admin nếu status = approved)
             const { data: orderBeforeUpdate } = await supabaseAdmin
                 .from('orders')
-                .select('id, total_price, status')
+                .select('id, total_price, status, type, course_id, user_id')
                 .eq('id', id)
                 .single();
 
@@ -431,16 +430,26 @@ class OrderController {
                 message: `Đã cập nhật trạng thái đơn hàng thành ${status}`
             });
 
-            // ─── STEP AFTER RESPONSE: Cộng doanh thu về ví Admin ─────────
+            // ─── STEP AFTER RESPONSE: Xử lý theo loại đơn hàng ─────────
             // Fire & Forget – không ảnh hưởng đến response đã gửi
             if (status === 'approved' && orderBeforeUpdate && orderBeforeUpdate.status === 'pending') {
-                OrderController._creditAdminWallet({
-                    admin_user_id: user.id,
-                    order_id: parseInt(id),
-                    amount: orderBeforeUpdate.total_price
-                }).catch(err => {
-                    console.error(`⚠️ [AdminWallet] Unhandled error crediting wallet for order #${id}:`, err.message);
-                });
+                if (orderBeforeUpdate.type === 'course') {
+                    OrderController._processCourseApproval({
+                        order_id: parseInt(id),
+                        course_id: orderBeforeUpdate.course_id,
+                        user_id: orderBeforeUpdate.user_id,
+                        received_amount: orderBeforeUpdate.total_price,
+                        payment_method: 'COD'
+                    }).catch(err => console.error(`⚠️ [CourseApproval] Unhandled error:`, err.message));
+                } else {
+                    OrderController._creditAdminWallet({
+                        admin_user_id: user.id,
+                        order_id: parseInt(id),
+                        amount: orderBeforeUpdate.total_price
+                    }).catch(err => {
+                        console.error(`⚠️ [AdminWallet] Unhandled error crediting wallet:`, err.message);
+                    });
+                }
             }
 
         } catch (error) {
@@ -523,6 +532,80 @@ class OrderController {
         } catch (err) {
             console.error(`❌ [AdminWallet] Failed to credit wallet for order #${order_id}:`, err.message);
             // Không throw – đây là fire & forget
+        }
+    }
+
+    /**
+     * Helper nội bộ: Xử lý ghi danh khóa học và chia tiền cho giáo viên
+     */
+    static async _processCourseApproval({ order_id, course_id, user_id, received_amount, payment_method }) {
+        let dbClient = null;
+        try {
+            console.log(`🎓 [CourseApproval] Processing course enrollment for order #${order_id}`);
+
+            // 1. Fetch course info
+            const { data: course, error: courseError } = await supabaseAdmin
+                .from('courses')
+                .select('title, teacher_id')
+                .eq('id', course_id)
+                .single();
+
+            if (courseError || !course) throw new Error('Course not found');
+
+            dbClient = await pool.connect();
+            await dbClient.query('BEGIN');
+
+            // 2. Thêm course_enrollments (dùng UPSERT SQL thuần để vượt qua lỗi cache Supabase JS)
+            const enrollSql = `
+                INSERT INTO course_enrollments (course_id, user_id, order_id, status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (course_id, user_id)
+                DO UPDATE SET
+                    order_id = EXCLUDED.order_id,
+                    status = EXCLUDED.status
+            `;
+            await dbClient.query(enrollSql, [
+                course_id,
+                user_id,
+                order_id,
+                'active'
+            ]);
+
+            // 3. Phân bổ doanh thu cho giáo viên (80%)
+            if (course.teacher_id) {
+                const teacherId = course.teacher_id;
+                const platformFeePercentage = 0.20; // Admin giữ 20%
+                const teacherEarnings = received_amount * (1 - platformFeePercentage);
+
+                const walletRes = await dbClient.query(
+                    'UPDATE wallets SET available_balance = available_balance + $1 WHERE user_id = $2 RETURNING id',
+                    [teacherEarnings, teacherId]
+                );
+                if (walletRes.rows.length === 0) {
+                    const newW = await dbClient.query(
+                        'INSERT INTO wallets (user_id, available_balance, locked_balance) VALUES ($1, $2, 0) RETURNING id',
+                        [teacherId, teacherEarnings]
+                    );
+                    await dbClient.query(
+                        'INSERT INTO transactions (wallet_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6)',
+                        [newW.rows[0].id, 'IN', teacherEarnings, 'course_fee', order_id.toString(), `Doanh thu khóa học ${course.title}`]
+                    );
+                } else {
+                    await dbClient.query(
+                        'INSERT INTO transactions (wallet_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6)',
+                        [walletRes.rows[0].id, 'IN', teacherEarnings, 'course_fee', order_id.toString(), `Doanh thu khóa học ${course.title}`]
+                    );
+                }
+                console.log(`✅ [CourseApproval] Đã cộng ${teacherEarnings} vào ví giáo viên ${teacherId}`);
+            }
+
+            await dbClient.query('COMMIT');
+
+        } catch (err) {
+            if (dbClient) await dbClient.query('ROLLBACK');
+            console.error(`❌ [CourseApproval] Lỗi xử lý khóa học cho order #${order_id}:`, err.message);
+        } finally {
+            if (dbClient) dbClient.release();
         }
     }
 
@@ -740,58 +823,25 @@ class OrderController {
 
             console.log(`✅ Order #${orderId} payment confirmed!`);
 
-            // ─── XỬ LÝ ĐẶC THÙ CHO KHÓA HỌC ───
+            // ─── XỬ LÝ ĐẶC THÙ CHO KHÓA HỌC / ĐÀN ───
             if (order.type === 'course' && order.course_id) {
-                // 1. Thêm course_enrollments
-                await supabaseAdmin
-                    .from('course_enrollments')
-                    .insert({
-                        course_id: order.course_id,
-                        user_id: order.user_id,
-                        order_id: order.id,
-                        status: 'active'
+                await OrderController._processCourseApproval({
+                    order_id: orderId,
+                    course_id: order.course_id,
+                    user_id: order.user_id,
+                    received_amount: receivedAmount,
+                    payment_method: 'QR'
+                });
+            } else {
+                // For Piano buys/rents via QR, credit admin wallet.
+                // We need an admin user ID. Let's look up the first admin.
+                const { data: adminUser } = await supabaseAdmin.from('profiles').select('id').eq('role', 'admin').limit(1).single();
+                if (adminUser) {
+                    await OrderController._creditAdminWallet({
+                        admin_user_id: adminUser.id,
+                        order_id: orderId,
+                        amount: receivedAmount
                     });
-
-                // 2. Phân bổ doanh thu cho giáo viên (80%)
-                if (order.course?.teacher_id) {
-                    const teacherId = order.course.teacher_id;
-                    const platformFeePercentage = 0.20; // Admin giữ 20%
-                    const teacherEarnings = receivedAmount * (1 - platformFeePercentage);
-
-                    try {
-                        const dbClient = await pool.connect();
-                        try {
-                            await dbClient.query('BEGIN');
-                            const walletRes = await dbClient.query(
-                                'UPDATE wallets SET available_balance = available_balance + $1 WHERE user_id = $2 RETURNING id',
-                                [teacherEarnings, teacherId]
-                            );
-                            if (walletRes.rows.length === 0) {
-                                const newW = await dbClient.query(
-                                    'INSERT INTO wallets (user_id, available_balance, locked_balance) VALUES ($1, $2, 0) RETURNING id',
-                                    [teacherId, teacherEarnings]
-                                );
-                                await dbClient.query(
-                                    'INSERT INTO transactions (wallet_id, user_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-                                    [newW.rows[0].id, teacherId, 'course_revenue', teacherEarnings, 'order', order.id, `Doanh thu khóa học ${order.course.title}`]
-                                );
-                            } else {
-                                await dbClient.query(
-                                    'INSERT INTO transactions (wallet_id, user_id, type, amount, reference_type, reference_id, note) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-                                    [walletRes.rows[0].id, teacherId, 'course_revenue', teacherEarnings, 'order', order.id, `Doanh thu khóa học ${order.course.title}`]
-                                );
-                            }
-                            await dbClient.query('COMMIT');
-                            console.log(`✅ Đã cộng ${teacherEarnings} vào ví giáo viên ${teacherId}`);
-                        } catch (txErr) {
-                            await dbClient.query('ROLLBACK');
-                            throw txErr;
-                        } finally {
-                            dbClient.release();
-                        }
-                    } catch (walletErr) {
-                        console.error('Lỗi khi cộng tiền vào ví giáo viên:', walletErr);
-                    }
                 }
             }
 
