@@ -24,6 +24,7 @@ CourseController.createCourse = async (req, res) => {
         const {
             title, description, price, duration_weeks,
             sessions_per_week, max_students, start_date, schedule, thumbnail_url,
+            cover_url, demo_video_url,
             is_online, location
         } = req.body;
 
@@ -44,6 +45,8 @@ CourseController.createCourse = async (req, res) => {
                 start_date,
                 schedule,
                 thumbnail_url,
+                cover_url,
+                demo_video_url,
                 is_online: is_online !== false,
                 location,
                 status: 'draft'
