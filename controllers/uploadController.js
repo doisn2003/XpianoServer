@@ -62,6 +62,20 @@ const UPLOAD_CONFIG = {
         maxSize: MAX_VIDEO_SIZE,
         getPath: (_userId, filename, resourceId) => `videos/${resourceId}/${filename}`,
     },
+    post_image: {
+        bucket: 'xpiano_media',
+        allowedRoles: ['user', 'teacher', 'admin'],
+        allowedMimeTypes: ALLOWED_IMAGE_TYPES,
+        maxSize: MAX_IMAGE_SIZE,
+        getPath: (userId, filename) => `${userId}/${filename}`,
+    },
+    post_video: {
+        bucket: 'xpiano_media',
+        allowedRoles: ['user', 'teacher', 'admin'],
+        allowedMimeTypes: ALLOWED_VIDEO_TYPES,
+        maxSize: MAX_VIDEO_SIZE,
+        getPath: (userId, filename) => `${userId}/${filename}`,
+    },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -101,9 +115,9 @@ class UploadController {
     /**
      * POST /api/upload/sign
      * 
-     * Request body:
+     * request body:
      * {
-     *   uploadType: 'avatar' | 'course_video' | 'certificate' | 'piano_image' | 'piano_video',
+     *   uploadType: 'avatar' | 'course_video' | 'certificate' | 'piano_image' | 'piano_video' | 'post_image' | 'post_video',
      *   fileName: 'original-file-name.jpg',
      *   fileSize: 1234567,         // bytes
      *   contentType: 'image/jpeg', // MIME type
