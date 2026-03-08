@@ -39,11 +39,19 @@ async function enrichWithProfiles(items, userIdField = 'user_id') {
 PostController.createPost = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { content, media_urls, media_type, post_type, related_course_id, visibility } = req.body;
+        const {
+            content, media_urls, media_type, post_type, related_course_id, visibility,
+            title, hashtags, location, thumbnail_url, duration, related_piano_id
+        } = req.body;
 
         if (!content && (!media_urls || media_urls.length === 0)) {
             return res.status(400).json({ success: false, message: 'Nội dung hoặc media là bắt buộc' });
         }
+
+        // Normalize hashtags: lowercase, trim, remove duplicates
+        const normalizedHashtags = hashtags
+            ? [...new Set(hashtags.map(h => h.toLowerCase().trim().replace(/^#/, '')).filter(Boolean))]
+            : [];
 
         const { data, error } = await supabaseAdmin
             .from('posts')
@@ -54,7 +62,13 @@ PostController.createPost = async (req, res) => {
                 media_type: media_type || 'none',
                 post_type: post_type || 'general',
                 related_course_id: related_course_id || null,
-                visibility: visibility || 'public'
+                visibility: visibility || 'public',
+                title: title?.trim() || null,
+                hashtags: normalizedHashtags,
+                location: location?.trim() || null,
+                thumbnail_url: thumbnail_url || null,
+                duration: duration || null,
+                related_piano_id: related_piano_id || null
             })
             .select('*')
             .single();
@@ -82,7 +96,7 @@ PostController.getFeed = async (req, res) => {
     try {
         const userId = req.user?.id;
         const { cursor, limit } = parsePagination(req.query);
-        const { type } = req.query;
+        const { type, media } = req.query;
 
         let query = supabaseAdmin
             .from('posts')
@@ -97,6 +111,11 @@ PostController.getFeed = async (req, res) => {
 
         if (type && type !== 'all') {
             query = query.eq('post_type', type);
+        }
+
+        // Filter by media_type: video, image, none
+        if (media && media !== 'all') {
+            query = query.eq('media_type', media);
         }
 
         const { data: posts, error } = await query;
@@ -223,7 +242,10 @@ PostController.updatePost = async (req, res) => {
     try {
         const postId = req.params.id;
         const userId = req.user.id;
-        const { content, media_urls, media_type, visibility } = req.body;
+        const {
+            content, media_urls, media_type, visibility,
+            title, hashtags, location, thumbnail_url, duration, related_piano_id
+        } = req.body;
 
         // Verify ownership
         const { data: existing } = await supabaseAdmin
@@ -241,6 +263,14 @@ PostController.updatePost = async (req, res) => {
         if (media_urls !== undefined) updates.media_urls = media_urls;
         if (media_type !== undefined) updates.media_type = media_type;
         if (visibility !== undefined) updates.visibility = visibility;
+        if (title !== undefined) updates.title = title?.trim() || null;
+        if (hashtags !== undefined) {
+            updates.hashtags = [...new Set(hashtags.map(h => h.toLowerCase().trim().replace(/^#/, '')).filter(Boolean))];
+        }
+        if (location !== undefined) updates.location = location?.trim() || null;
+        if (thumbnail_url !== undefined) updates.thumbnail_url = thumbnail_url;
+        if (duration !== undefined) updates.duration = duration;
+        if (related_piano_id !== undefined) updates.related_piano_id = related_piano_id;
 
         const { data, error } = await supabaseAdmin
             .from('posts')
@@ -522,6 +552,217 @@ PostController.deleteComment = async (req, res) => {
     } catch (error) {
         console.error('Delete comment error:', error);
         res.status(500).json({ success: false, message: 'Lỗi xóa bình luận', error: error.message });
+    }
+};
+
+// ============================================================================
+// VIEW TRACKING
+// ============================================================================
+
+/**
+ * POST /api/posts/:id/view - Track a view on a post
+ * Unique per user (authenticated) or per IP (anonymous).
+ * Client should debounce: only call after user stays ≥3s on a post.
+ */
+PostController.trackView = async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const viewerId = req.user?.id || null;
+        const viewerIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+            || req.connection?.remoteAddress
+            || req.ip;
+
+        // Verify post exists
+        const { data: post } = await supabaseAdmin
+            .from('posts')
+            .select('id')
+            .eq('id', postId)
+            .single();
+
+        if (!post) {
+            return res.status(404).json({ success: false, message: 'Bài viết không tồn tại' });
+        }
+
+        // Check if already viewed
+        let alreadyViewed = false;
+        if (viewerId) {
+            // Authenticated user: unique by (post_id, viewer_id)
+            const { data: existing } = await supabaseAdmin
+                .from('post_views')
+                .select('id')
+                .eq('post_id', postId)
+                .eq('viewer_id', viewerId)
+                .maybeSingle();
+            alreadyViewed = !!existing;
+        } else if (viewerIp) {
+            // Anonymous: unique by (post_id, viewer_ip)
+            const { data: existing } = await supabaseAdmin
+                .from('post_views')
+                .select('id')
+                .eq('post_id', postId)
+                .is('viewer_id', null)
+                .eq('viewer_ip', viewerIp)
+                .maybeSingle();
+            alreadyViewed = !!existing;
+        }
+
+        if (alreadyViewed) {
+            // Already counted, return current count
+            const { data: currentPost } = await supabaseAdmin
+                .from('posts')
+                .select('views_count')
+                .eq('id', postId)
+                .single();
+            return res.json({
+                success: true,
+                message: 'Đã xem trước đó',
+                data: { views_count: currentPost?.views_count || 0, is_new_view: false }
+            });
+        }
+
+        // Insert new view
+        const { error } = await supabaseAdmin
+            .from('post_views')
+            .insert({
+                post_id: postId,
+                viewer_id: viewerId,
+                viewer_ip: viewerIp || null
+            });
+
+        if (error) {
+            // Handle unique constraint violation gracefully (race condition)
+            if (error.code === '23505') {
+                const { data: currentPost } = await supabaseAdmin
+                    .from('posts')
+                    .select('views_count')
+                    .eq('id', postId)
+                    .single();
+                return res.json({
+                    success: true,
+                    message: 'Đã xem trước đó',
+                    data: { views_count: currentPost?.views_count || 0, is_new_view: false }
+                });
+            }
+            throw error;
+        }
+
+        // Get updated count (trigger already updated it)
+        const { data: updatedPost } = await supabaseAdmin
+            .from('posts')
+            .select('views_count')
+            .eq('id', postId)
+            .single();
+
+        res.json({
+            success: true,
+            message: 'Đã ghi nhận lượt xem',
+            data: { views_count: updatedPost?.views_count || 0, is_new_view: true }
+        });
+    } catch (error) {
+        console.error('Track view error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi ghi nhận lượt xem', error: error.message });
+    }
+};
+
+// ============================================================================
+// SHARE TRACKING
+// ============================================================================
+
+/**
+ * POST /api/posts/:id/share - Track a share on a post
+ */
+PostController.sharePost = async (req, res) => {
+    try {
+        const postId = req.params.id;
+
+        // Get current count
+        const { data: post, error: fetchError } = await supabaseAdmin
+            .from('posts')
+            .select('shares_count')
+            .eq('id', postId)
+            .single();
+
+        if (fetchError || !post) {
+            return res.status(404).json({ success: false, message: 'Bài viết không tồn tại' });
+        }
+
+        // Increment shares_count
+        const { data: updatedPost, error } = await supabaseAdmin
+            .from('posts')
+            .update({ shares_count: (post.shares_count || 0) + 1 })
+            .eq('id', postId)
+            .select('shares_count')
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            success: true,
+            message: 'Chia sẻ thành công',
+            data: { shares_count: updatedPost?.shares_count || 0 }
+        });
+    } catch (error) {
+        console.error('Share post error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi chia sẻ bài viết', error: error.message });
+    }
+};
+
+// ============================================================================
+// HASHTAGS
+// ============================================================================
+
+/**
+ * GET /api/posts/hashtags/trending - Get trending hashtags
+ * Query: ?limit=20
+ */
+PostController.trendingHashtags = async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+
+        const { data: hashtags, error } = await supabaseAdmin
+            .from('hashtags')
+            .select('*')
+            .gt('posts_count', 0)
+            .order('posts_count', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+
+        res.json({ success: true, data: hashtags || [] });
+    } catch (error) {
+        console.error('Trending hashtags error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy trending hashtags', error: error.message });
+    }
+};
+
+/**
+ * GET /api/posts/hashtags/search - Search/suggest hashtags
+ * Query: ?q=pia&limit=10
+ */
+PostController.searchHashtags = async (req, res) => {
+    try {
+        const { q } = req.query;
+        const limit = Math.min(parseInt(req.query.limit) || 10, 30);
+
+        if (!q || q.trim().length === 0) {
+            return res.json({ success: true, data: [] });
+        }
+
+        const searchTerm = q.toLowerCase().trim().replace(/^#/, '');
+
+        const { data: hashtags, error } = await supabaseAdmin
+            .from('hashtags')
+            .select('*')
+            .ilike('name', `${searchTerm}%`)
+            .order('posts_count', { ascending: false })
+            .limit(limit);
+
+        if (error) throw error;
+
+        res.json({ success: true, data: hashtags || [] });
+    } catch (error) {
+        console.error('Search hashtags error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi tìm hashtag', error: error.message });
     }
 };
 

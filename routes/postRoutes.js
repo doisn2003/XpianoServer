@@ -4,6 +4,12 @@ const PostController = require('../controllers/postController');
 const { authenticate, optionalAuthenticate } = require('../middlewares/authMiddleware');
 
 // ============================================================================
+// HASHTAGS (Must be before /:id routes to avoid 'hashtags' matching as :id)
+// ============================================================================
+router.get('/hashtags/trending', PostController.trendingHashtags);
+router.get('/hashtags/search', PostController.searchHashtags);
+
+// ============================================================================
 // POSTS
 // ============================================================================
 
@@ -22,6 +28,12 @@ router.delete('/:id', authenticate, PostController.deletePost);
 // ============================================================================
 router.post('/:id/like', authenticate, PostController.likePost);
 router.delete('/:id/like', authenticate, PostController.unlikePost);
+
+// ============================================================================
+// VIEWS & SHARES
+// ============================================================================
+router.post('/:id/view', optionalAuthenticate, PostController.trackView);
+router.post('/:id/share', authenticate, PostController.sharePost);
 
 // ============================================================================
 // COMMENTS
