@@ -290,7 +290,7 @@ class OrderController {
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category)
+                    piano:pianos(id, name, image_url, category, description, reviews_count, price_per_day)
                 `)
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
@@ -325,7 +325,7 @@ class OrderController {
                 .from('rentals')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category)
+                    piano:pianos(id, name, image_url, category, description, reviews_count, price_per_day)
                 `)
                 .eq('user_id', user.id)
                 .eq('status', 'active')
