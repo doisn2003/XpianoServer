@@ -439,10 +439,10 @@ class AuthController {
     static async updateProfile(req, res) {
         try {
             const user = req.user;
-            const { full_name, phone, avatar_url, date_of_birth } = req.body;
+            const { full_name, phone, avatar_url, date_of_birth, occupation, school, location, hobbies, instruments, bio } = req.body;
 
             console.log('🔄 Updating profile for user:', user.id);
-            console.log('📝 Data to update:', { full_name, phone, avatar_url, date_of_birth });
+            console.log('📝 Data to update:', { full_name, phone, avatar_url, date_of_birth, occupation, school, location, hobbies, instruments, bio });
 
             // Update in Supabase Auth Metadata using Admin client
             const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(
@@ -465,7 +465,13 @@ class AuthController {
                 full_name,
                 phone,
                 avatar_url,
-                date_of_birth
+                date_of_birth,
+                occupation,
+                school,
+                location,
+                hobbies,
+                instruments,
+                bio
             });
 
             console.log('✅ Profile updated successfully:', updatedProfile);
