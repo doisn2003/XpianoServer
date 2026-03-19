@@ -10,6 +10,11 @@ router.get('/hashtags/trending', PostController.trendingHashtags);
 router.get('/hashtags/search', PostController.searchHashtags);
 
 // ============================================================================
+// SAVED POSTS (must be before /:id)
+// ============================================================================
+router.get('/saved', authenticate, PostController.getSavedPosts);
+
+// ============================================================================
 // POSTS
 // ============================================================================
 
@@ -28,6 +33,12 @@ router.delete('/:id', authenticate, PostController.deletePost);
 // ============================================================================
 router.post('/:id/like', authenticate, PostController.likePost);
 router.delete('/:id/like', authenticate, PostController.unlikePost);
+
+// ============================================================================
+// BOOKMARKS
+// ============================================================================
+router.post('/:id/save', authenticate, PostController.savePost);
+router.delete('/:id/save', authenticate, PostController.unsavePost);
 
 // ============================================================================
 // VIEWS & SHARES

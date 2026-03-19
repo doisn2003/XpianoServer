@@ -121,8 +121,9 @@ PostController.getFeed = async (req, res) => {
         const { data: posts, error } = await query;
         if (error) throw error;
 
-        // Check if current user liked each post
+        // Check if current user liked/saved each post
         let likedPostIds = new Set();
+        let savedPostIds = new Set();
         if (userId && posts.length > 0) {
             const postIds = posts.slice(0, limit).map(p => p.id);
             const { data: likes } = await supabaseAdmin
@@ -131,13 +132,21 @@ PostController.getFeed = async (req, res) => {
                 .eq('user_id', userId)
                 .in('post_id', postIds);
             likedPostIds = new Set((likes || []).map(l => l.post_id));
+
+            const { data: saves } = await supabaseAdmin
+                .from('saved_posts')
+                .select('post_id')
+                .eq('user_id', userId)
+                .in('post_id', postIds);
+            savedPostIds = new Set((saves || []).map(s => s.post_id));
         }
 
         const response = buildPaginatedResponse(posts, limit);
         response.data = await enrichWithProfiles(response.data);
         response.data = response.data.map(post => ({
             ...post,
-            is_liked: likedPostIds.has(post.id)
+            is_liked: likedPostIds.has(post.id),
+            is_saved: savedPostIds.has(post.id)
         }));
 
         res.json({ success: true, ...response });
@@ -172,6 +181,7 @@ PostController.getUserPosts = async (req, res) => {
         if (error) throw error;
 
         let likedPostIds = new Set();
+        let savedPostIds = new Set();
         if (currentUserId && posts.length > 0) {
             const postIds = posts.slice(0, limit).map(p => p.id);
             const { data: likes } = await supabaseAdmin
@@ -180,13 +190,21 @@ PostController.getUserPosts = async (req, res) => {
                 .eq('user_id', currentUserId)
                 .in('post_id', postIds);
             likedPostIds = new Set((likes || []).map(l => l.post_id));
+
+            const { data: saves } = await supabaseAdmin
+                .from('saved_posts')
+                .select('post_id')
+                .eq('user_id', currentUserId)
+                .in('post_id', postIds);
+            savedPostIds = new Set((saves || []).map(s => s.post_id));
         }
 
         const response = buildPaginatedResponse(posts, limit);
         response.data = await enrichWithProfiles(response.data);
         response.data = response.data.map(post => ({
             ...post,
-            is_liked: likedPostIds.has(post.id)
+            is_liked: likedPostIds.has(post.id),
+            is_saved: savedPostIds.has(post.id)
         }));
 
         res.json({ success: true, ...response });
@@ -216,8 +234,9 @@ PostController.getPost = async (req, res) => {
 
         const [enriched] = await enrichWithProfiles([post]);
 
-        // Check if liked
+        // Check if liked & saved
         let isLiked = false;
+        let isSaved = false;
         if (currentUserId) {
             const { data: like } = await supabaseAdmin
                 .from('post_likes')
@@ -226,9 +245,17 @@ PostController.getPost = async (req, res) => {
                 .eq('user_id', currentUserId)
                 .single();
             isLiked = !!like;
+
+            const { data: save } = await supabaseAdmin
+                .from('saved_posts')
+                .select('id')
+                .eq('post_id', postId)
+                .eq('user_id', currentUserId)
+                .maybeSingle();
+            isSaved = !!save;
         }
 
-        res.json({ success: true, data: { ...enriched, is_liked: isLiked } });
+        res.json({ success: true, data: { ...enriched, is_liked: isLiked, is_saved: isSaved } });
     } catch (error) {
         console.error('Get post error:', error);
         res.status(500).json({ success: false, message: 'Lỗi lấy bài viết', error: error.message });
@@ -763,6 +790,131 @@ PostController.searchHashtags = async (req, res) => {
     } catch (error) {
         console.error('Search hashtags error:', error);
         res.status(500).json({ success: false, message: 'Lỗi tìm hashtag', error: error.message });
+    }
+};
+
+// ============================================================================
+// SAVED POSTS (Bookmark)
+// ============================================================================
+
+/**
+ * POST /api/posts/:id/save - Save/bookmark a post
+ */
+PostController.savePost = async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        const { error } = await supabaseAdmin
+            .from('saved_posts')
+            .insert({ post_id: postId, user_id: userId });
+
+        if (error) {
+            if (error.code === '23505') {
+                return res.status(409).json({ success: false, message: 'Bài viết đã được lưu trước đó' });
+            }
+            throw error;
+        }
+
+        res.json({ success: true, message: 'Đã lưu bài viết', data: { is_saved: true } });
+    } catch (error) {
+        console.error('Save post error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lưu bài viết', error: error.message });
+    }
+};
+
+/**
+ * DELETE /api/posts/:id/save - Unsave/unbookmark a post
+ */
+PostController.unsavePost = async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        const { error } = await supabaseAdmin
+            .from('saved_posts')
+            .delete()
+            .eq('post_id', postId)
+            .eq('user_id', userId);
+
+        if (error) throw error;
+
+        res.json({ success: true, message: 'Đã bỏ lưu bài viết', data: { is_saved: false } });
+    } catch (error) {
+        console.error('Unsave post error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi bỏ lưu bài viết', error: error.message });
+    }
+};
+
+/**
+ * GET /api/posts/saved - Get saved posts for current user
+ */
+PostController.getSavedPosts = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { cursor, limit } = parsePagination(req.query);
+
+        let query = supabaseAdmin
+            .from('saved_posts')
+            .select('post_id, created_at')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(limit + 1);
+
+        if (cursor) {
+            query = query.lt('created_at', cursor);
+        }
+
+        const { data: savedRows, error } = await query;
+        if (error) throw error;
+
+        const response = buildPaginatedResponse(savedRows, limit);
+        const postIds = response.data.map(r => r.post_id);
+
+        if (postIds.length === 0) {
+            return res.json({ success: true, data: [], has_more: false, next_cursor: null });
+        }
+
+        // Fetch actual posts
+        const { data: posts, error: postsError } = await supabaseAdmin
+            .from('posts')
+            .select('*')
+            .in('id', postIds);
+
+        if (postsError) throw postsError;
+
+        // Maintain saved order
+        const postMap = {};
+        (posts || []).forEach(p => { postMap[p.id] = p; });
+        let orderedPosts = postIds.map(id => postMap[id]).filter(Boolean);
+
+        // Check likes
+        let likedPostIds = new Set();
+        if (orderedPosts.length > 0) {
+            const { data: likes } = await supabaseAdmin
+                .from('post_likes')
+                .select('post_id')
+                .eq('user_id', userId)
+                .in('post_id', postIds);
+            likedPostIds = new Set((likes || []).map(l => l.post_id));
+        }
+
+        orderedPosts = await enrichWithProfiles(orderedPosts);
+        orderedPosts = orderedPosts.map(post => ({
+            ...post,
+            is_liked: likedPostIds.has(post.id),
+            is_saved: true
+        }));
+
+        res.json({
+            success: true,
+            data: orderedPosts,
+            has_more: response.has_more,
+            next_cursor: response.next_cursor
+        });
+    } catch (error) {
+        console.error('Get saved posts error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi lấy bài viết đã lưu', error: error.message });
     }
 };
 
