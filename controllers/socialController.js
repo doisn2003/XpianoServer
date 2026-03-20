@@ -199,7 +199,7 @@ SocialController.getUserPublicProfile = async (req, res) => {
 
         const { data: profile } = await supabaseAdmin
             .from('profiles')
-            .select('id, full_name, avatar_url, role, followers_count, following_count')
+            .select('id, full_name, avatar_url, role, followers_count, following_count, date_of_birth, occupation, school, location, hobbies, instruments, bio')
             .eq('id', userId)
             .single();
 
@@ -263,7 +263,7 @@ SocialController.getTeacherPublicProfile = async (req, res) => {
         // Get basic profile info
         const { data: profile } = await supabaseAdmin
             .from('profiles')
-            .select('id, full_name, avatar_url, role, followers_count, following_count')
+            .select('id, full_name, avatar_url, role, followers_count, following_count, date_of_birth, occupation, school, location, hobbies, instruments, bio')
             .eq('id', teacherId)
             .single();
 

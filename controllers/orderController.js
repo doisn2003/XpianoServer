@@ -184,20 +184,9 @@ class OrderController {
                 data: responseData
             });
 
-            // ─── STEP 8: Xử lý Affiliate (FIRE & FORGET – KHÔNG chặn response) ──
-            // Nguyên tắc: Nếu bước này lỗi, khách KHÔNG bị ảnh hưởng.
-            // Toàn bộ lỗi chỉ được log ra console, không throw lên trên.
-            if (affiliate_ref && typeof affiliate_ref === 'string' && affiliate_ref.trim().length > 0) {
-                OrderController._processAffiliateCommission({
-                    affiliate_ref: affiliate_ref.trim().toUpperCase(),
-                    buyer_user_id: user.id,
-                    order_id: order.id,
-                    total_price: totalPrice
-                }).catch(err => {
-                    // Đảm bảo promise không unhandled
-                    console.error(`⚠️ [Affiliate] Unhandled error for order #${order.id}:`, err.message);
-                });
-            }
+            // ─── STEP 8: Affiliate xử lý sau khi thanh toán thành công ──
+            // Commission bây giờ chỉ được tạo khi đơn hàng được thanh toán (approved/paid)
+            // Xem _processAffiliateViaRPC() được gọi ở updateOrderStatus và handleSepayWebhook
 
         } catch (error) {
             console.error('Error in createOrder:', error);
@@ -210,71 +199,44 @@ class OrderController {
     }
 
     /**
-     * Helper nội bộ: Tạo commission cho affiliate sau khi đơn hàng được tạo thành công.
-     * Đây là hàm PRIVATE, chỉ dùng trong class này.
-     * Được thiết kế để KHÔNG BAO GIỜ throw lên ngoài – mọi lỗi đều được catch và log.
+     * Helper nội bộ: Gọi RPC process_paid_order_affiliate khi đơn hàng được thanh toán.
+     * Fire & Forget – KHÔNG BAO GIỜ throw lên ngoài.
+     *
+     * Xử lý toàn bộ logic:
+     *   - Kiểm tra buyer có được referred không
+     *   - 30-day window
+     *   - Commission 15% (course) / 10% (piano)
+     *   - First purchase → increment counter → milestone bonus
      *
      * @param {object} params
-     * @param {string} params.affiliate_ref     - Mã giới thiệu từ localStorage của khách
-     * @param {string} params.buyer_user_id     - ID của người mua hàng (để chống gian lận tự giới thiệu)
-     * @param {number} params.order_id          - ID đơn hàng vừa tạo
-     * @param {number} params.total_price       - Giá trị đơn hàng (để tính commission)
+     * @param {number|string} params.order_id    - ID đơn hàng
+     * @param {string} params.buyer_user_id      - UUID người mua
+     * @param {number} params.total_price        - Giá trị đơn hàng
+     * @param {string} params.product_type       - 'course' | 'buy' | 'rent'
      */
-    static async _processAffiliateCommission({ affiliate_ref, buyer_user_id, order_id, total_price }) {
+    static async _processAffiliateViaRPC({ order_id, buyer_user_id, total_price, product_type }) {
         try {
-            console.log(`🔗 [Affiliate] Processing commission for ref="${affiliate_ref}", order #${order_id}`);
+            console.log(`🔗 [Affiliate] Processing affiliate for order #${order_id}, type=${product_type}`);
 
-            // ─── Tìm affiliate theo referral_code ────────────────────────
-            const { data: affiliate, error: affiliateError } = await supabaseAdmin
-                .from('affiliates')
-                .select('id, user_id, commission_rate, status')
-                .eq('referral_code', affiliate_ref)
-                .eq('status', 'active')  // Chỉ affiliate đang active mới nhận hoa hồng
-                .single();
+            const { data, error } = await supabaseAdmin.rpc('process_paid_order_affiliate', {
+                p_order_id: order_id.toString(),
+                p_buyer_user_id: buyer_user_id,
+                p_total_price: total_price,
+                p_product_type: product_type
+            });
 
-            if (affiliateError || !affiliate) {
-                console.log(`ℹ️ [Affiliate] Ref="${affiliate_ref}" not found or inactive. No commission created.`);
-                return; // Không lỗi, chỉ không có affiliate hợp lệ
-            }
-
-            // ─── Chống gian lận: Không cho tự giới thiệu chính mình ──────
-            if (affiliate.user_id === buyer_user_id) {
-                console.warn(`🚨 [Affiliate] FRAUD DETECTED: User ${buyer_user_id} tried to self-refer with code "${affiliate_ref}". Commission blocked.`);
+            if (error) {
+                console.error(`❌ [Affiliate] RPC error for order #${order_id}:`, error.message);
                 return;
             }
 
-            // ─── Tính tiền hoa hồng ───────────────────────────────────────
-            // commission_amount = total_price * commission_rate (VD: 10% của đơn hàng)
-            const commissionAmount = Math.round(total_price * parseFloat(affiliate.commission_rate));
-
-            if (commissionAmount <= 0) {
-                console.log(`ℹ️ [Affiliate] Commission amount is 0 for order #${order_id}. Skipping.`);
-                return;
+            if (data?.skipped) {
+                console.log(`ℹ️ [Affiliate] Skipped for order #${order_id}: ${data.reason}`);
+            } else {
+                console.log(`✅ [Affiliate] Commission created for order #${order_id}:`, JSON.stringify(data));
             }
-
-            // ─── Insert commission với status 'pending' ───────────────────
-            // Status 'pending' → Admin sẽ duyệt thủ công bằng approve_commission RPC
-            const { error: insertError } = await supabaseAdmin
-                .from('commissions')
-                .insert({
-                    affiliate_id: affiliate.id,
-                    amount: commissionAmount,
-                    reference_type: 'order_piano',
-                    reference_id: order_id.toString(),
-                    status: 'pending',
-                    note: `Hoa hồng từ đơn hàng #${order_id} (${(parseFloat(affiliate.commission_rate) * 100).toFixed(0)}% × ${total_price.toLocaleString('vi-VN')} VNĐ)`
-                });
-
-            if (insertError) {
-                console.error(`❌ [Affiliate] Failed to insert commission for order #${order_id}:`, insertError.message);
-                return;
-            }
-
-            console.log(`✅ [Affiliate] Commission created: ${commissionAmount.toLocaleString('vi-VN')} VNĐ for affiliate ${affiliate.id} (ref: ${affiliate_ref}), order #${order_id}`);
-
         } catch (err) {
-            // Đảm bảo KHÔNG bao giờ crash server hay ảnh hưởng đơn hàng
-            console.error(`❌ [Affiliate] Unexpected error processing commission for order #${order_id}:`, err.message);
+            console.error(`❌ [Affiliate] Unexpected error for order #${order_id}:`, err.message);
         }
     }
 
@@ -290,7 +252,7 @@ class OrderController {
                 .from('orders')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category)
+                    piano:pianos(id, name, image_url, category, description, reviews_count, price_per_day)
                 `)
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false });
@@ -325,7 +287,7 @@ class OrderController {
                 .from('rentals')
                 .select(`
                     *,
-                    piano:pianos(id, name, image_url, category)
+                    piano:pianos(id, name, image_url, category, description, reviews_count, price_per_day)
                 `)
                 .eq('user_id', user.id)
                 .eq('status', 'active')
@@ -450,6 +412,14 @@ class OrderController {
                         console.error(`⚠️ [AdminWallet] Unhandled error crediting wallet:`, err.message);
                     });
                 }
+
+                // ─── Affiliate: Xử lý hoa hồng sau thanh toán ────────────
+                OrderController._processAffiliateViaRPC({
+                    order_id: parseInt(id),
+                    buyer_user_id: orderBeforeUpdate.user_id,
+                    total_price: orderBeforeUpdate.total_price,
+                    product_type: orderBeforeUpdate.type
+                }).catch(err => console.error(`⚠️ [Affiliate] Unhandled error:`, err.message));
             }
 
         } catch (error) {
@@ -834,7 +804,6 @@ class OrderController {
                 });
             } else {
                 // For Piano buys/rents via QR, credit admin wallet.
-                // We need an admin user ID. Let's look up the first admin.
                 const { data: adminUser } = await supabaseAdmin.from('profiles').select('id').eq('role', 'admin').limit(1).single();
                 if (adminUser) {
                     await OrderController._creditAdminWallet({
@@ -844,6 +813,14 @@ class OrderController {
                     });
                 }
             }
+
+            // ─── Affiliate: Xử lý hoa hồng sau thanh toán QR ─────────
+            OrderController._processAffiliateViaRPC({
+                order_id: orderId,
+                buyer_user_id: order.user_id,
+                total_price: receivedAmount,
+                product_type: order.type
+            }).catch(err => console.error(`⚠️ [Affiliate] Webhook affiliate error:`, err.message));
 
             // Get user email for notification
             const { data: profile } = await supabaseAdmin

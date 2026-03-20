@@ -85,6 +85,15 @@ class UserModel {
                 paramCount++;
             }
 
+            const newFields = ['occupation', 'school', 'location', 'hobbies', 'instruments', 'bio'];
+            for (const field of newFields) {
+                if (userData[field] !== undefined) {
+                    fields.push(`${field} = $${paramCount}`);
+                    params.push(userData[field]);
+                    paramCount++;
+                }
+            }
+
             if (fields.length === 0) {
                 throw new Error('No fields to update');
             }

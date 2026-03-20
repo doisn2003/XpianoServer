@@ -16,6 +16,7 @@ router.get('/me/teaching', authenticate, CourseController.getMyTeachingCourses);
 router.get('/:id/enrollments', authenticate, CourseController.getCourseEnrollments);
 router.post('/', authenticate, CourseController.createCourse);
 router.put('/:id', authenticate, CourseController.updateCourse);
+router.delete('/:id', authenticate, CourseController.deleteCourse);
 router.post('/:id/publish', authenticate, CourseController.publishCourse);
 // Admin endpoints
 router.get('/admin/stats', authenticate, CourseController.getAdminStats);

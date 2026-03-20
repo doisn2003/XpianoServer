@@ -98,6 +98,37 @@ CourseController.updateCourse = async (req, res) => {
     }
 };
 
+CourseController.deleteCourse = async (req, res) => {
+    try {
+        const courseId = req.params.id;
+        const teacherId = req.user.id;
+
+        const { data: course } = await supabaseAdmin
+            .from('courses')
+            .select('teacher_id, status')
+            .eq('id', courseId)
+            .single();
+
+        if (!course || course.teacher_id !== teacherId) {
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+        }
+
+        if (course.status === 'published') {
+            return res.status(400).json({ success: false, message: 'Không thể xóa khóa học đã xuất bản' });
+        }
+
+        const { error } = await supabaseAdmin
+            .from('courses')
+            .delete()
+            .eq('id', courseId);
+
+        if (error) throw error;
+        res.status(200).json({ success: true, message: 'Xóa khóa học thành công' });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi xóa khóa học', error: e.message });
+    }
+};
+
 CourseController.publishCourse = async (req, res) => {
     try {
         const courseId = req.params.id;
