@@ -69,7 +69,7 @@ class AuthController {
     // POST /api/auth/register-verify (Complete registration with OTP)
     static async registerWithOtp(req, res) {
         try {
-            const { email, token, password, full_name, phone, role, date_of_birth } = req.body;
+            const { email, token, password, full_name, phone, role, date_of_birth, referral_code } = req.body;
 
             // 1. Verify OTP from DB
             const verifyQuery = `
@@ -83,6 +83,26 @@ class AuthController {
                     success: false,
                     message: 'Mã xác thực không đúng hoặc đã hết hạn'
                 });
+            }
+
+            // 1.5. Resolve referral_code → affiliate ID (if provided)
+            let referredByAffiliateId = null;
+            if (referral_code && typeof referral_code === 'string' && referral_code.trim().length > 0) {
+                try {
+                    const affResult = await pool.query(
+                        `SELECT id FROM affiliates WHERE referral_code = $1 AND status = 'active'`,
+                        [referral_code.trim().toUpperCase()]
+                    );
+                    if (affResult.rows.length > 0) {
+                        referredByAffiliateId = affResult.rows[0].id;
+                        console.log(`🔗 [Referral] Code "${referral_code}" resolved to affiliate ${referredByAffiliateId}`);
+                    } else {
+                        console.log(`ℹ️ [Referral] Code "${referral_code}" not found or inactive. Ignoring.`);
+                    }
+                } catch (refErr) {
+                    console.warn('⚠️ [Referral] Error resolving referral_code:', refErr.message);
+                    // Không block đăng ký vì referral lỗi
+                }
             }
 
             // 2. Create User in Supabase (Confirm immediately)
@@ -102,24 +122,27 @@ class AuthController {
             const user = userData.user;
 
             // 3. Ensure sync to 'public.users' AND 'profiles'
-            // We need to know which table is the primary source of truth for the mobile app.
-            // Assuming 'profiles' is the table linked to auth.users by trigger.
-            // But User mentioned 'public.users'. Let's ensure both are handled or verified.
-
             // Explicitly Insert into 'profiles' (if trigger didn't catch it or for safety)
             // Use Upsert to allow triggers to have created it already
-            await supabaseAdmin.from('profiles').upsert({
+            const profileUpsertData = {
                 id: user.id,
                 full_name,
                 phone,
                 role: role || 'user',
                 date_of_birth,
-                email: email, // If profiles has email column
+                email: email,
                 avatar_url: null
-            });
+            };
+
+            // Nếu có referral hợp lệ, gắn affiliate vào profile
+            if (referredByAffiliateId) {
+                profileUpsertData.referred_by_affiliate_id = referredByAffiliateId;
+                profileUpsertData.affiliate_registered_at = new Date().toISOString();
+            }
+
+            await supabaseAdmin.from('profiles').upsert(profileUpsertData);
 
             // Also Insert/Upsert into 'public.users' if it exists and is different
-            // Based on User request: "stored in public.users instead of auth.users" implies public.users is the main one.
             try {
                 await pool.query(`
                     INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
@@ -128,7 +151,6 @@ class AuthController {
                     SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
                  `, [user.id, email, full_name, phone, role || 'user']);
             } catch (dbError) {
-                // Maybe table doesn't exist or has different schema. Log but don't fail registration if Supabase User is created.
                 console.warn('Sync to public.users warning:', dbError.message);
             }
 

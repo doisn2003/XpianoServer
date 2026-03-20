@@ -116,9 +116,10 @@ class AffiliateController {
         try {
             const userId = req.user.id;
 
-            // 1. Lấy thông tin affiliate
+            // 1. Lấy thông tin affiliate (bao gồm total_active_referred_users)
             const affiliateResult = await pool.query(
-                `SELECT id, user_id, referral_code, commission_rate, status, created_at, updated_at
+                `SELECT id, user_id, referral_code, commission_rate, status, 
+                        total_active_referred_users, created_at, updated_at
                  FROM affiliates
                  WHERE user_id = $1`,
                 [userId]
@@ -133,16 +134,37 @@ class AffiliateController {
             }
 
             const affiliate = affiliateResult.rows[0];
+            const totalUsers = parseInt(affiliate.total_active_referred_users) || 0;
 
-            // 2. Thống kê hoa hồng theo status
+            // 2. Tính milestone progress
+            // Tìm mốc tiếp theo: mốc 10 (500k) hoặc mốc 50 (1M)
+            const nextMilestone10 = Math.ceil((totalUsers + 1) / 10) * 10;
+            const nextMilestone50 = Math.ceil((totalUsers + 1) / 50) * 50;
+
+            let nextMilestone, nextBonusAmount;
+            if (nextMilestone10 === nextMilestone50) {
+                // Mốc tiếp theo vừa là bội 10 vừa là bội 50 → thưởng 1M
+                nextMilestone = nextMilestone50;
+                nextBonusAmount = 1000000;
+            } else {
+                // Mốc tiếp theo là bội 10 (nhưng không phải bội 50) → thưởng 500k
+                nextMilestone = nextMilestone10;
+                nextBonusAmount = 500000;
+            }
+
+            const progressToNext = totalUsers % (nextMilestone <= nextMilestone10 ? 10 : 50);
+            const progressTarget = nextMilestone <= nextMilestone10 ? 10 : 50;
+
+            // 3. Thống kê hoa hồng theo status (phân biệt standard vs bonus)
             const statsResult = await pool.query(
                 `SELECT
                     status,
+                    is_bonus,
                     COUNT(*) AS count,
                     COALESCE(SUM(amount), 0) AS total_amount
                  FROM commissions
                  WHERE affiliate_id = $1
-                 GROUP BY status`,
+                 GROUP BY status, is_bonus`,
                 [affiliate.id]
             );
 
@@ -150,20 +172,23 @@ class AffiliateController {
             const stats = {
                 pending: { count: 0, total: 0 },
                 approved: { count: 0, total: 0 },
-                cancelled: { count: 0, total: 0 }
+                cancelled: { count: 0, total: 0 },
+                bonus_pending: { count: 0, total: 0 },
+                bonus_approved: { count: 0, total: 0 }
             };
             statsResult.rows.forEach(row => {
-                if (stats[row.status] !== undefined) {
-                    stats[row.status] = {
+                const key = row.is_bonus ? `bonus_${row.status}` : row.status;
+                if (stats[key] !== undefined) {
+                    stats[key] = {
                         count: parseInt(row.count),
                         total: parseFloat(row.total_amount)
                     };
                 }
             });
 
-            // 3. Lấy 20 commissions gần nhất
+            // 4. Lấy 20 commissions gần nhất
             const commissionsResult = await pool.query(
-                `SELECT id, amount, reference_type, reference_id, status, note, created_at, updated_at
+                `SELECT id, amount, reference_type, reference_id, status, is_bonus, note, created_at, updated_at
                  FROM commissions
                  WHERE affiliate_id = $1
                  ORDER BY created_at DESC
@@ -180,8 +205,21 @@ class AffiliateController {
                         commission_rate: parseFloat(affiliate.commission_rate),
                         commission_rate_percent: `${(parseFloat(affiliate.commission_rate) * 100).toFixed(0)}%`,
                         status: affiliate.status,
+                        total_active_referred_users: totalUsers,
                         created_at: affiliate.created_at,
                         updated_at: affiliate.updated_at
+                    },
+                    milestones: {
+                        current_users: totalUsers,
+                        next_milestone: nextMilestone,
+                        next_bonus_amount: nextBonusAmount,
+                        progress_in_current_cycle: progressToNext,
+                        progress_target: progressTarget,
+                        commission_rates: {
+                            course: '15%',
+                            piano: '10%'
+                        },
+                        validity_window_days: 30
                     },
                     stats: {
                         pending_count: stats.pending.count,
@@ -190,7 +228,9 @@ class AffiliateController {
                         approved_total: stats.approved.total,
                         cancelled_count: stats.cancelled.count,
                         cancelled_total: stats.cancelled.total,
-                        lifetime_earned: stats.approved.total // Tổng thu nhập
+                        bonus_pending_total: stats.bonus_pending.total,
+                        bonus_approved_total: stats.bonus_approved.total,
+                        lifetime_earned: stats.approved.total + stats.bonus_approved.total
                     },
                     commissions: commissionsResult.rows.map(c => ({
                         ...c,
