@@ -7,7 +7,8 @@ class PianoController {
             const filters = {
                 category: req.query.category,
                 minRating: req.query.minRating,
-                maxPrice: req.query.maxPrice
+                maxPrice: req.query.maxPrice,
+                statusLabel: req.query.statusLabel
             };
 
             const pianos = await PianoModel.findAll(filters);

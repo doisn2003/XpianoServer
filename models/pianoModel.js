@@ -29,6 +29,13 @@ class PianoModel {
                 paramCount++;
             }
 
+            // Filter by statusLabel
+            if (filters.statusLabel) {
+                query += ` AND "statusLabel" = $${paramCount}`;
+                params.push(filters.statusLabel);
+                paramCount++;
+            }
+
             query += ' ORDER BY created_at DESC';
 
             const result = await pool.query(query, params);
@@ -53,8 +60,8 @@ class PianoModel {
     static async create(pianoData) {
         try {
             const query = `
-        INSERT INTO pianos (name, image_url, category, price_per_day, price, rating, reviews_count, description, features)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO pianos (name, image_url, category, price_per_day, price, rating, reviews_count, description, features, brand, quantity, location, "statusLabel")
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING *;
       `;
 
@@ -72,7 +79,11 @@ class PianoModel {
                 pianoData.rating || 0,
                 pianoData.reviews_count || 0,
                 pianoData.description,
-                features
+                features,
+                pianoData.brand,
+                pianoData.quantity || 0,
+                pianoData.location,
+                pianoData.statusLabel
             ]);
 
             return result.rows[0];
@@ -142,6 +153,30 @@ class PianoModel {
                     ? pianoData.features
                     : [];
                 params.push(features);
+                paramCount++;
+            }
+
+            if (pianoData.brand !== undefined) {
+                fields.push(`brand = $${paramCount}`);
+                params.push(pianoData.brand);
+                paramCount++;
+            }
+
+            if (pianoData.quantity !== undefined) {
+                fields.push(`quantity = $${paramCount}`);
+                params.push(pianoData.quantity);
+                paramCount++;
+            }
+
+            if (pianoData.location !== undefined) {
+                fields.push(`location = $${paramCount}`);
+                params.push(pianoData.location);
+                paramCount++;
+            }
+
+            if (pianoData.statusLabel !== undefined) {
+                fields.push(`"statusLabel" = $${paramCount}`);
+                params.push(pianoData.statusLabel);
                 paramCount++;
             }
 
