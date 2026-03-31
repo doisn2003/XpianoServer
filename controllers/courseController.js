@@ -1,7 +1,18 @@
+/**
+ * courseController.js
+ * Quản lý Course Template — Khóa học (nội dung, giáo trình, bài tập).
+ * Course KHÔNG còn chứa lịch học hay sĩ số.
+ * Lịch tuyển sinh → scheduleController.js
+ * Lớp học thực tế → classController.js
+ */
 const { supabaseAdmin } = require('../utils/supabaseClient');
 const { parsePagination, buildPaginatedResponse } = require('../utils/pagination');
 
 const CourseController = {};
+
+// ─────────────────────────────────────────────
+// HELPER
+// ─────────────────────────────────────────────
 
 async function fetchProfiles(userIds) {
     if (!userIds || userIds.length === 0) return {};
@@ -14,316 +25,40 @@ async function fetchProfiles(userIds) {
     return map;
 }
 
-// ==========================================
-// TEACHER ENDPOINTS
-// ==========================================
-
-CourseController.createCourse = async (req, res) => {
-    try {
-        const teacherId = req.user.id;
-        const {
-            title, description, price, duration_weeks,
-            sessions_per_week, max_students, start_date, schedule, thumbnail_url,
-            cover_url, demo_video_url,
-            is_online, location
-        } = req.body;
-
-        if (!title || !start_date || !schedule) {
-            return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc: title, start_date, schedule' });
-        }
-
-        const { data, error } = await supabaseAdmin
-            .from('courses')
-            .insert({
-                teacher_id: teacherId,
-                title: title.trim(),
-                description: description?.trim(),
-                price: price || 0,
-                duration_weeks: duration_weeks || 4,
-                sessions_per_week: sessions_per_week || 2,
-                max_students: max_students || 10,
-                start_date,
-                schedule,
-                thumbnail_url,
-                cover_url,
-                demo_video_url,
-                is_online: is_online !== false,
-                location,
-                status: 'draft'
-            })
-            .select('*')
-            .single();
-
-        if (error) throw error;
-        res.status(201).json({ success: true, message: 'Tạo khóa học thành công', data });
-    } catch (e) {
-        console.error('Error creating course', e);
-        res.status(500).json({ success: false, message: 'Lỗi tạo khóa học', error: e.message });
+function validateTeacherRole(req, res) {
+    if (!req.user || !['teacher', 'admin'].includes(req.user.role)) {
+        res.status(403).json({ success: false, message: 'Chỉ giáo viên mới có thể thực hiện thao tác này' });
+        return false;
     }
-};
+    return true;
+}
 
-CourseController.updateCourse = async (req, res) => {
-    try {
-        const courseId = req.params.id;
-        const teacherId = req.user.id;
-        const updates = req.body;
-
-        const { data: course } = await supabaseAdmin
-            .from('courses')
-            .select('teacher_id, status')
-            .eq('id', courseId)
-            .single();
-
-        if (!course || course.teacher_id !== teacherId) {
-            return res.status(403).json({ success: false, message: 'Không có quyền' });
-        }
-
-        if (course.status === 'published') {
-            return res.status(400).json({ success: false, message: 'Không thể sửa khóa học đã publish (hãy xem xét tạo khóa mới)' });
-        }
-
-        updates.updated_at = new Date().toISOString();
-
-        const { data, error } = await supabaseAdmin
-            .from('courses')
-            .update(updates)
-            .eq('id', courseId)
-            .select('*')
-            .single();
-
-        if (error) throw error;
-        res.status(200).json({ success: true, message: 'Cập nhật thành công', data });
-    } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi cập nhật khóa học', error: e.message });
-    }
-};
-
-CourseController.deleteCourse = async (req, res) => {
-    try {
-        const courseId = req.params.id;
-        const teacherId = req.user.id;
-
-        const { data: course } = await supabaseAdmin
-            .from('courses')
-            .select('teacher_id, status')
-            .eq('id', courseId)
-            .single();
-
-        if (!course || course.teacher_id !== teacherId) {
-            return res.status(403).json({ success: false, message: 'Không có quyền' });
-        }
-
-        if (course.status === 'published') {
-            return res.status(400).json({ success: false, message: 'Không thể xóa khóa học đã xuất bản' });
-        }
-
-        const { error } = await supabaseAdmin
-            .from('courses')
-            .delete()
-            .eq('id', courseId);
-
-        if (error) throw error;
-        res.status(200).json({ success: true, message: 'Xóa khóa học thành công' });
-    } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi xóa khóa học', error: e.message });
-    }
-};
-
-CourseController.publishCourse = async (req, res) => {
-    try {
-        const courseId = req.params.id;
-        const teacherId = req.user.id;
-
-        const { data: course } = await supabaseAdmin
-            .from('courses')
-            .select('*')
-            .eq('id', courseId)
-            .single();
-
-        if (!course || course.teacher_id !== teacherId) {
-            return res.status(403).json({ success: false, message: 'Không có quyền' });
-        }
-
-        if (course.status === 'published') {
-            return res.status(400).json({ success: false, message: 'Khóa học đã được publish' });
-        }
-
-        const startDate = new Date(course.start_date);
-        const scheduleArr = course.schedule || [];
-        const durationWeeks = course.duration_weeks || 4;
-
-        if (scheduleArr.length === 0) {
-            return res.status(400).json({ success: false, message: 'Lịch học trống' });
-        }
-
-        const sessionsToInsert = [];
-        let sessionCount = 1;
-
-        for (let w = 0; w < durationWeeks; w++) {
-            for (const sch of scheduleArr) {
-                let schDay = parseInt(sch.day_of_week);
-
-                let startOfWeekW = new Date(startDate);
-                startOfWeekW.setDate(startDate.getDate() + (w * 7));
-
-                let currentDayOfWeek = startOfWeekW.getDay();
-                let dayDiff = schDay - currentDayOfWeek;
-
-                let classDate = new Date(startOfWeekW);
-                classDate.setDate(startOfWeekW.getDate() + dayDiff);
-
-                let [hours, minutes] = sch.time.split(':');
-                classDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-
-                const roomId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-                sessionsToInsert.push({
-                    teacher_id: teacherId,
-                    course_id: course.id,
-                    title: `${course.title} - Buổi ${sessionCount}`,
-                    description: `Buổi học số ${sessionCount} của khóa học ${course.title}`,
-                    scheduled_at: classDate.toISOString(),
-                    duration_minutes: 60,
-                    room_id: roomId,
-                    max_participants: course.max_students,
-                    status: 'scheduled'
-                });
-
-                sessionCount++;
-            }
-        }
-
-        if (sessionsToInsert.length > 0) {
-            const { error: sessionError } = await supabaseAdmin
-                .from('live_sessions')
-                .insert(sessionsToInsert);
-
-            if (sessionError) throw sessionError;
-        }
-
-        const { error: updateError } = await supabaseAdmin
-            .from('courses')
-            .update({ status: 'published', updated_at: new Date().toISOString() })
-            .eq('id', courseId);
-
-        if (updateError) throw updateError;
-
-        res.json({ success: true, message: 'Publish khóa học thành công, đã tự động sinh các buổi học', generated_sessions: sessionsToInsert.length });
-    } catch (e) {
-        console.error('Publish error', e);
-        res.status(500).json({ success: false, message: 'Lỗi publish khóa học', error: e.message });
-    }
-};
-
-CourseController.getMyTeachingCourses = async (req, res) => {
-    try {
-        const teacherId = req.user.id;
-        const { cursor, limit } = parsePagination(req.query);
-
-        let query = supabaseAdmin
-            .from('courses')
-            .select('*')
-            .eq('teacher_id', teacherId)
-            .order('created_at', { ascending: false })
-            .limit(limit + 1);
-
-        if (cursor) query = query.lt('created_at', cursor);
-
-        const { data: courses, error } = await query;
-        if (error) throw error;
-
-        res.json({ success: true, ...buildPaginatedResponse(courses, limit) });
-    } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách khóa học của giáo viên', error: e.message });
-    }
-};
-
-CourseController.getCourseEnrollments = async (req, res) => {
-    try {
-        const courseId = req.params.id;
-        const teacherId = req.user.id;
-
-        const { data: course } = await supabaseAdmin.from('courses').select('id, teacher_id').eq('id', courseId).single();
-        if (!course || course.teacher_id !== teacherId) return res.status(403).json({ success: false, message: 'Không có quyền' });
-
-        const { data: enrollments, error } = await supabaseAdmin
-            .from('course_enrollments')
-            .select('*')
-            .eq('course_id', courseId)
-            .eq('status', 'active');
-
-        if (error) throw error;
-
-        const userIds = enrollments.map(e => e.user_id);
-        const profileMap = await fetchProfiles(userIds);
-
-        const enriched = enrollments.map(e => ({
-            ...e,
-            user: profileMap[e.user_id] || { id: e.user_id }
-        }));
-
-        res.json({ success: true, data: enriched });
-    } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
-    }
-};
-
-// ==========================================
-// LEARNER ENDPOINTS
-// ==========================================
-
-CourseController.getMyEnrolledCourses = async (req, res) => {
-    try {
-        const userId = req.user.id;
-
-        const { data: enrollments, error } = await supabaseAdmin
-            .from('course_enrollments')
-            .select('*, course:courses(*)')
-            .eq('user_id', userId)
-            .eq('status', 'active')
-            .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        // Enrich teacher
-        const teacherIds = [...new Set(enrollments.map(e => e.course?.teacher_id).filter(Boolean))];
-        const profileMap = await fetchProfiles(teacherIds);
-
-        const data = enrollments.map(e => ({
-            ...e.course,
-            enrollment_id: e.id,
-            enrollment_date: e.created_at,
-            teacher: profileMap[e.course.teacher_id] || { id: e.course.teacher_id }
-        }));
-
-        res.json({ success: true, data });
-    } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
-    }
-};
-
-// ==========================================
+// ─────────────────────────────────────────────
 // PUBLIC ENDPOINTS
-// ==========================================
+// ─────────────────────────────────────────────
 
+/** GET /api/courses — Danh sách khóa học public (status = active) */
 CourseController.getPublicCourses = async (req, res) => {
     try {
         const { cursor, limit } = parsePagination(req.query);
+        const { level, category, search } = req.query;
 
         let query = supabaseAdmin
             .from('courses')
-            .select('*')
-            .eq('status', 'published')
+            .select('id, teacher_id, title, description, price, level, category, thumbnail_url, cover_url, demo_video_url, objectives, status, created_at')
+            .eq('status', 'active')
             .order('created_at', { ascending: false })
             .limit(limit + 1);
 
         if (cursor) query = query.lt('created_at', cursor);
+        if (level) query = query.eq('level', level);
+        if (category) query = query.eq('category', category);
+        if (search) query = query.ilike('title', `%${search}%`);
 
         const { data: courses, error } = await query;
         if (error) throw error;
 
         const response = buildPaginatedResponse(courses, limit);
-
         const teacherIds = [...new Set(response.data.map(c => c.teacher_id))];
         const profileMap = await fetchProfiles(teacherIds);
 
@@ -334,46 +69,71 @@ CourseController.getPublicCourses = async (req, res) => {
 
         res.json({ success: true, ...response });
     } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
+        console.error('getPublicCourses error', e);
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách khóa học', error: e.message });
     }
 };
 
+/** GET /api/courses/:id — Chi tiết khóa học (kèm schedules đang mở tuyển sinh) */
 CourseController.getCourseDetails = async (req, res) => {
     try {
-        const courseId = req.params.id;
+        const { id } = req.params;
+
         const { data: course, error } = await supabaseAdmin
             .from('courses')
             .select('*')
-            .eq('id', courseId)
+            .eq('id', id)
             .single();
 
-        if (error || !course) return res.status(404).json({ success: false, message: 'Không tìm thấy' });
+        if (error || !course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
 
+        // Enrich teacher profile
         const profileMap = await fetchProfiles([course.teacher_id]);
         course.teacher = profileMap[course.teacher_id] || { id: course.teacher_id };
 
-        // count enrollments
-        const { count } = await supabaseAdmin.from('course_enrollments')
-            .select('id', { count: 'exact', head: true })
-            .eq('course_id', courseId)
-            .eq('status', 'active');
+        // Lấy các lịch tuyển sinh đang mở
+        const { data: schedules } = await supabaseAdmin
+            .from('course_schedules')
+            .select('id, name, start_date, duration_weeks, sessions_per_week, schedule, is_online, location, max_students, enrolled_count, price, requires_payment, status')
+            .eq('course_id', id)
+            .eq('status', 'enrolling')
+            .order('start_date', { ascending: true });
 
-        course.enrolled_count = count || 0;
+        // Thống kê review
+        const { data: reviewStats } = await supabaseAdmin
+            .from('course_reviews')
+            .select('rating')
+            .eq('course_id', id)
+            .eq('status', 'published');
 
-        res.json({ success: true, data: course });
+        const ratings = (reviewStats || []).map(r => r.rating);
+        const avg_rating = ratings.length > 0
+            ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
+            : null;
+
+        res.json({
+            success: true,
+            data: {
+                ...course,
+                open_schedules: schedules || [],
+                review_summary: { avg_rating, total_reviews: ratings.length }
+            }
+        });
     } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
+        console.error('getCourseDetails error', e);
+        res.status(500).json({ success: false, message: 'Lỗi lấy chi tiết khóa học', error: e.message });
     }
 };
 
+/** GET /api/courses/teacher/:teacherId — Khóa học public của 1 giáo viên */
 CourseController.getTeacherCourses = async (req, res) => {
     try {
-        const teacherId = req.params.teacherId;
+        const { teacherId } = req.params;
         const { data: courses, error } = await supabaseAdmin
             .from('courses')
-            .select('*')
+            .select('id, title, description, price, level, category, thumbnail_url, cover_url, status, created_at')
             .eq('teacher_id', teacherId)
-            .eq('status', 'published')
+            .eq('status', 'active')
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -383,26 +143,326 @@ CourseController.getTeacherCourses = async (req, res) => {
     }
 };
 
+// ─────────────────────────────────────────────
+// TEACHER ENDPOINTS
+// ─────────────────────────────────────────────
+
+/** GET /api/courses/me/teaching — Tất cả khóa học của GV (mọi status) */
+CourseController.getMyTeachingCourses = async (req, res) => {
+    try {
+        const teacherId = req.user.id;
+        const { cursor, limit } = parsePagination(req.query);
+        const { status } = req.query;
+
+        let query = supabaseAdmin
+            .from('courses')
+            .select('*')
+            .eq('teacher_id', teacherId)
+            .order('created_at', { ascending: false })
+            .limit(limit + 1);
+
+        if (cursor) query = query.lt('created_at', cursor);
+        if (status) query = query.eq('status', status);
+
+        const { data: courses, error } = await query;
+        if (error) throw error;
+
+        res.json({ success: true, ...buildPaginatedResponse(courses, limit) });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi lấy danh sách khóa học', error: e.message });
+    }
+};
+
+/** POST /api/courses — Tạo khóa học mới (Template) */
+CourseController.createCourse = async (req, res) => {
+    try {
+        if (!validateTeacherRole(req, res)) return;
+
+        const teacherId = req.user.id;
+        const {
+            title, description, price,
+            level, category,
+            thumbnail_url, cover_url, demo_video_url,
+            objectives, requirements, syllabus, musicxml_files,
+            duration_weeks
+        } = req.body;
+
+        if (!title) {
+            return res.status(400).json({ success: false, message: 'Tiêu đề khóa học là bắt buộc' });
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('courses')
+            .insert({
+                teacher_id:     teacherId,
+                title:          title.trim(),
+                description:    description?.trim(),
+                price:          price || 0,
+                duration_weeks: duration_weeks || 8,
+                level:          level || null,
+                category:       category || null,
+                thumbnail_url:  thumbnail_url || null,
+                cover_url:      cover_url || null,
+                demo_video_url: demo_video_url || null,
+                objectives:     objectives || [],
+                requirements:   requirements || [],
+                syllabus:       syllabus || [],
+                musicxml_files: musicxml_files || [],
+                status:         'draft'
+            })
+            .select('*')
+            .single();
+
+        if (error) throw error;
+        res.status(201).json({ success: true, message: 'Tạo khóa học thành công', data });
+    } catch (e) {
+        console.error('createCourse error', e);
+        res.status(500).json({ success: false, message: 'Lỗi tạo khóa học', error: e.message });
+    }
+};
+
+/** PUT /api/courses/:id — Cập nhật khóa học (KHÔNG bị khóa sau publish, luôn sửa được) */
+CourseController.updateCourse = async (req, res) => {
+    try {
+        if (!validateTeacherRole(req, res)) return;
+
+        const { id } = req.params;
+        const teacherId = req.user.id;
+
+        // Kiểm tra quyền sở hữu
+        const { data: course } = await supabaseAdmin
+            .from('courses')
+            .select('id, teacher_id, status')
+            .eq('id', id)
+            .single();
+
+        if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy khóa học' });
+        if (course.teacher_id !== teacherId && req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa khóa học này' });
+        }
+
+        // Chỉ cho phép sửa các trường nội dung
+        const allowedFields = [
+            'title', 'description', 'price', 'duration_weeks',
+            'level', 'category',
+            'thumbnail_url', 'cover_url', 'demo_video_url',
+            'objectives', 'requirements', 'syllabus', 'musicxml_files'
+        ];
+
+        const updates = {};
+        allowedFields.forEach(field => {
+            if (req.body[field] !== undefined) updates[field] = req.body[field];
+        });
+        updates.updated_at = new Date().toISOString();
+
+        const { data, error } = await supabaseAdmin
+            .from('courses')
+            .update(updates)
+            .eq('id', id)
+            .select('*')
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Cập nhật khóa học thành công', data });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi cập nhật khóa học', error: e.message });
+    }
+};
+
+/** PUT /api/courses/:id/activate — Chuyển sang active (có thể mở lớp) */
+CourseController.activateCourse = async (req, res) => {
+    try {
+        if (!validateTeacherRole(req, res)) return;
+
+        const { id } = req.params;
+        const { data: course } = await supabaseAdmin.from('courses').select('teacher_id, status, title').eq('id', id).single();
+
+        if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy' });
+        if (course.teacher_id !== req.user.id && req.user.role !== 'admin')
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+        if (course.status === 'active')
+            return res.status(400).json({ success: false, message: 'Khóa học đã ở trạng thái active' });
+        if (!course.title)
+            return res.status(400).json({ success: false, message: 'Khóa học cần có tiêu đề trước khi active' });
+
+        const { data, error } = await supabaseAdmin
+            .from('courses')
+            .update({ status: 'active', updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select('*')
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Khóa học đã được kích hoạt, giờ có thể mở lịch tuyển sinh', data });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi kích hoạt khóa học', error: e.message });
+    }
+};
+
+/** PUT /api/courses/:id/archive — Lưu trữ khóa học (không mở lớp mới được) */
+CourseController.archiveCourse = async (req, res) => {
+    try {
+        if (!validateTeacherRole(req, res)) return;
+
+        const { id } = req.params;
+        const { data: course } = await supabaseAdmin.from('courses').select('teacher_id, status').eq('id', id).single();
+
+        if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy' });
+        if (course.teacher_id !== req.user.id && req.user.role !== 'admin')
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+
+        // Kiểm tra không có lớp đang ongoing
+        const { count } = await supabaseAdmin
+            .from('course_classes')
+            .select('id', { count: 'exact', head: true })
+            .eq('course_id', id)
+            .eq('status', 'ongoing');
+
+        if (count > 0)
+            return res.status(400).json({ success: false, message: `Có ${count} lớp đang diễn ra. Không thể lưu trữ khóa học.` });
+
+        const { data, error } = await supabaseAdmin
+            .from('courses')
+            .update({ status: 'archived', updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select('id, title, status')
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, message: 'Khóa học đã được lưu trữ', data });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi lưu trữ khóa học', error: e.message });
+    }
+};
+
+/** DELETE /api/courses/:id — Xóa khóa học (chỉ khi draft, không có class nào) */
+CourseController.deleteCourse = async (req, res) => {
+    try {
+        if (!validateTeacherRole(req, res)) return;
+
+        const { id } = req.params;
+        const { data: course } = await supabaseAdmin.from('courses').select('teacher_id, status').eq('id', id).single();
+
+        if (!course) return res.status(404).json({ success: false, message: 'Không tìm thấy' });
+        if (course.teacher_id !== req.user.id && req.user.role !== 'admin')
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+
+        // Kiểm tra không có class nào
+        const { count } = await supabaseAdmin
+            .from('course_classes')
+            .select('id', { count: 'exact', head: true })
+            .eq('course_id', id);
+
+        if (count > 0)
+            return res.status(400).json({ success: false, message: `Không thể xóa: khóa học đã có ${count} lớp học liên kết. Hãy lưu trữ thay vì xóa.` });
+
+        const { error } = await supabaseAdmin.from('courses').delete().eq('id', id);
+        if (error) throw error;
+        res.json({ success: true, message: 'Xóa khóa học thành công' });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi xóa khóa học', error: e.message });
+    }
+};
+
+/** GET /api/courses/:id/enrollments — Xem học viên đang enrolled vào tất cả lớp của khóa */
+CourseController.getCourseEnrollments = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { data: course } = await supabaseAdmin.from('courses').select('teacher_id').eq('id', id).single();
+        if (!course || (course.teacher_id !== req.user.id && req.user.role !== 'admin'))
+            return res.status(403).json({ success: false, message: 'Không có quyền' });
+
+        const { data: enrollments, error } = await supabaseAdmin
+            .from('course_enrollments')
+            .select(`
+                id, status, payment_verified, created_at,
+                class:course_classes(id, name, start_date, status)
+            `)
+            .eq('course_id', id)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const userIds = enrollments.map(e => e.user_id);
+        const profileMap = await fetchProfiles(userIds);
+        const enriched = enrollments.map(e => ({ ...e, user: profileMap[e.user_id] || { id: e.user_id } }));
+
+        res.json({ success: true, data: enriched });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
+    }
+};
+
+// ─────────────────────────────────────────────
+// STUDENT ENDPOINTS
+// ─────────────────────────────────────────────
+
+/** GET /api/courses/me/enrolled — Khóa học đang tham gia của học viên */
+CourseController.getMyEnrolledCourses = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const { data: enrollments, error } = await supabaseAdmin
+            .from('course_enrollments')
+            .select(`
+                id, status, payment_verified, created_at,
+                course:courses(id, title, description, thumbnail_url, cover_url, level, category, price),
+                class:course_classes(id, name, start_date, end_date, status, is_online, location)
+            `)
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const teacherIds = [...new Set(enrollments.map(e => e.course?.teacher_id).filter(Boolean))];
+        const profileMap = await fetchProfiles(teacherIds);
+
+        const data = enrollments.map(e => ({
+            enrollment_id: e.id,
+            payment_verified: e.payment_verified,
+            enrolled_at: e.created_at,
+            course: e.course
+                ? { ...e.course, teacher: profileMap[e.course.teacher_id] || { id: e.course.teacher_id } }
+                : null,
+            class: e.class || null
+        }));
+
+        res.json({ success: true, data });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Lỗi', error: e.message });
+    }
+};
+
+// ─────────────────────────────────────────────
+// ADMIN ENDPOINTS
+// ─────────────────────────────────────────────
+
+/** GET /api/courses/admin/stats — Thống kê tổng quan (Admin) */
 CourseController.getAdminStats = async (req, res) => {
     try {
-        const { count: totalCourses } = await supabaseAdmin
-            .from('courses')
-            .select('id', { count: 'exact', head: true });
+        if (req.user.role !== 'admin')
+            return res.status(403).json({ success: false, message: 'Admin only' });
 
-        const { count: totalEnrollments } = await supabaseAdmin
-            .from('course_enrollments')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'active');
+        const [
+            { count: totalCourses },
+            { count: activeCourses },
+            { count: totalClasses },
+            { count: totalEnrollments }
+        ] = await Promise.all([
+            supabaseAdmin.from('courses').select('id', { count: 'exact', head: true }),
+            supabaseAdmin.from('courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+            supabaseAdmin.from('course_classes').select('id', { count: 'exact', head: true }),
+            supabaseAdmin.from('course_enrollments').select('id', { count: 'exact', head: true }).eq('status', 'active')
+        ]);
 
         res.json({
             success: true,
-            data: {
-                totalCourses: totalCourses || 0,
-                totalEnrollments: totalEnrollments || 0
-            }
+            data: { totalCourses, activeCourses, totalClasses, totalEnrollments }
         });
     } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi lấy thống kê khóa học admin', error: e.message });
+        res.status(500).json({ success: false, message: 'Lỗi thống kê', error: e.message });
     }
 };
 
