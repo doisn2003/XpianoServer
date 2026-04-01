@@ -1,6 +1,6 @@
 # Courses API Documentation
 
-> **Version:** 2.0 | **Base URL:** `{{baseUrl}}` (e.g. `http://localhost:3000`)
+> **Version:** 2.0 | **Base URL:** `{{baseUrl}}` (e.g. `http://localhost:5000`)
 > **Auth:** Bearer token — đính kèm header `Authorization: Bearer <jwt_token>`
 >
 > Hệ thống áp dụng kiến trúc **3 tầng**:

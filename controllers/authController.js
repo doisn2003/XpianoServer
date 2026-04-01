@@ -142,17 +142,6 @@ class AuthController {
 
             await supabaseAdmin.from('profiles').upsert(profileUpsertData);
 
-            // Also Insert/Upsert into 'public.users' if it exists and is different
-            try {
-                await pool.query(`
-                    INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE 
-                    SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
-                 `, [user.id, email, full_name, phone, role || 'user']);
-            } catch (dbError) {
-                console.warn('Sync to public.users warning:', dbError.message);
-            }
 
             // 4. Delete used OTP
             await pool.query('DELETE FROM verification_codes WHERE email = $1 AND type = $2', [email, 'signup']);
@@ -451,17 +440,6 @@ class AuthController {
                     console.error('❌ Failed to update auth metadata:', authError.message);
                 }
 
-                // 3. Sync sang bảng users (Mobile sync)
-                try {
-                    await pool.query(`
-                        INSERT INTO users (id, email, full_name, role, created_at)
-                        VALUES ($1, $2, $3, $4, NOW())
-                        ON CONFLICT (id) DO UPDATE 
-                        SET email = $2, full_name = $3, role = $4;
-                    `, [user.id, user.email, fullName, roleToSet]);
-                } catch (usersSyncError) {
-                    console.warn('⚠️ Sync to users table failed:', usersSyncError.message);
-                }
 
             // CASE 2: Google lần đầu, nhưng Supabase trigger ĐÃ tạo profile trước
             // với role mặc định ('user'), và có queryRole cần được set đúng
@@ -491,18 +469,6 @@ class AuthController {
                     console.error('❌ Failed to update auth metadata:', authError.message);
                 }
 
-                // 3. Sync sang bảng users (Mobile sync)
-                try {
-                    const fullName = user.user_metadata?.full_name || user.email.split('@')[0];
-                    await pool.query(`
-                        INSERT INTO users (id, email, full_name, role, created_at)
-                        VALUES ($1, $2, $3, $4, NOW())
-                        ON CONFLICT (id) DO UPDATE 
-                        SET role = $4, updated_at = NOW();
-                    `, [user.id, user.email, fullName, roleToSet]);
-                } catch (usersSyncError) {
-                    console.warn('⚠️ Sync to users table failed:', usersSyncError.message);
-                }
             }
 
             console.log('🔍 DEBUG getProfile:');
@@ -721,17 +687,6 @@ class AuthController {
                 avatar_url: null
             });
 
-            // 4. Sync to public.users
-            try {
-                await pool.query(`
-                    INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE 
-                    SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
-                `, [user.id, email, full_name, phone, role]);
-            } catch (dbError) {
-                console.warn('Sync to public.users warning:', dbError.message);
-            }
 
             // 5. Delete used OTP
             await pool.query('DELETE FROM verification_codes WHERE email = $1 AND type = $2', [email, 'signup']);

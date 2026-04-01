@@ -30,7 +30,11 @@ const authenticate = async (req, res, next) => {
             });
         }
 
-        console.log('Auth Middleware Success. User ID:', user.id);
+        // Attach our custom role from metadata to the user object for convenience in controllers
+        user.role = user.user_metadata?.role || user.app_metadata?.role || 'user';
+
+        console.log('Auth Middleware Success. User:', user.email, 'Role:', user.role);
+        
         // Attach user to request
         req.user = user;
         req.token = token;
