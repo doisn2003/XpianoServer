@@ -142,17 +142,6 @@ class AuthController {
 
             await supabaseAdmin.from('profiles').upsert(profileUpsertData);
 
-            // Also Insert/Upsert into 'public.users' if it exists and is different
-            try {
-                await pool.query(`
-                    INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE 
-                    SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
-                 `, [user.id, email, full_name, phone, role || 'user']);
-            } catch (dbError) {
-                console.warn('Sync to public.users warning:', dbError.message);
-            }
 
             // 4. Delete used OTP
             await pool.query('DELETE FROM verification_codes WHERE email = $1 AND type = $2', [email, 'signup']);
@@ -400,25 +389,103 @@ class AuthController {
     static async getProfile(req, res) {
         try {
             const user = req.user;
+            // Lấy role từ query nếu có (dùng cho Google login lần đầu)
+            const queryRole = req.query.role;
+
             // First check profiles table
-            const profile = await UserModel.findById(user.id);
+            let profile = await UserModel.findById(user.id);
+
+            const isGoogleUser = user.app_metadata?.provider === 'google';
+            // "Lần đầu" = Google user mà user_metadata.role chưa được hệ thống set
+            // Sau khi set xong, field này sẽ luôn có giá trị → tránh ghi đè lần sau
+            const isFirstTimeGoogleLogin = isGoogleUser && !user.user_metadata?.role;
+
+            // CASE 1: Google lần đầu, profile chưa tồn tại (trigger chưa tạo)
+            if (!profile && isGoogleUser) {
+                console.log(`🆕 [Google First-Login] No profile found for ${user.email}. Creating...`);
+
+                const roleToSet = queryRole || 'user';
+                const fullName = user.user_metadata?.full_name || user.email.split('@')[0];
+
+                const newProfile = {
+                    id: user.id,
+                    email: user.email,
+                    full_name: fullName,
+                    phone: user.user_metadata?.phone || '',
+                    role: roleToSet,
+                    avatar_url: user.user_metadata?.avatar_url || '',
+                };
+
+                // 1. Tạo profile
+                try {
+                    await pool.query(
+                        `INSERT INTO profiles (id, full_name, phone, role, avatar_url, email)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (id) DO NOTHING`,
+                        [newProfile.id, newProfile.full_name, newProfile.phone, newProfile.role, newProfile.avatar_url, newProfile.email]
+                    );
+                    profile = newProfile;
+                    console.log(`✅ Profile created with role: ${roleToSet}`);
+                } catch (dbError) {
+                    console.error('❌ Failed to create profile for Google user:', dbError.message);
+                }
+
+                // 2. Ghi role vào Auth Metadata (dùng làm "flag" không phải lần đầu nữa)
+                try {
+                    await supabaseAdmin.auth.admin.updateUserById(user.id, {
+                        user_metadata: { ...user.user_metadata, role: roleToSet }
+                    });
+                    console.log(`✅ Auth metadata set: role=${roleToSet}`);
+                } catch (authError) {
+                    console.error('❌ Failed to update auth metadata:', authError.message);
+                }
+
+
+            // CASE 2: Google lần đầu, nhưng Supabase trigger ĐÃ tạo profile trước
+            // với role mặc định ('user'), và có queryRole cần được set đúng
+            } else if (profile && isFirstTimeGoogleLogin && queryRole) {
+                const roleToSet = queryRole;
+                console.log(`🔄 [Google First-Login] Profile auto-existed for ${user.email}. Updating role: ${profile.role} → ${roleToSet}`);
+
+                // 1. Cập nhật role trong profiles
+                try {
+                    await pool.query(
+                        `UPDATE profiles SET role = $1, updated_at = NOW() WHERE id = $2`,
+                        [roleToSet, user.id]
+                    );
+                    profile = { ...profile, role: roleToSet };
+                    console.log(`✅ Profile role updated to: ${roleToSet}`);
+                } catch (dbError) {
+                    console.error('❌ Failed to update profile role:', dbError.message);
+                }
+
+                // 2. Ghi role vào Auth Metadata để đánh dấu "đã xử lý lần đầu"
+                try {
+                    await supabaseAdmin.auth.admin.updateUserById(user.id, {
+                        user_metadata: { ...user.user_metadata, role: roleToSet }
+                    });
+                    console.log(`✅ Auth metadata set: role=${roleToSet}`);
+                } catch (authError) {
+                    console.error('❌ Failed to update auth metadata:', authError.message);
+                }
+
+            }
 
             console.log('🔍 DEBUG getProfile:');
             console.log('- User ID:', user.id);
-            console.log('- Profile from DB:', profile);
-            console.log('- Profile role:', profile?.role);
+            console.log('- isGoogleUser:', isGoogleUser);
+            console.log('- isFirstTimeGoogleLogin:', isFirstTimeGoogleLogin);
+            console.log('- queryRole:', queryRole);
+            console.log('- Final role:', profile?.role || user.user_metadata?.role);
 
-            // Merge auth metadata if profile is partial?
-            // IMPORTANT: profile data should override user data
             const finalData = {
                 id: user.id,
                 email: user.email,
-                ...profile, // This will include role from profiles table
+                ...profile,
+                role: profile?.role || user.user_metadata?.role || 'user',
                 is_verified: !!user.email_confirmed_at,
                 user_metadata: user.user_metadata
             };
-
-            console.log('- Final data role:', finalData.role);
 
             res.status(200).json({
                 success: true,
@@ -620,17 +687,6 @@ class AuthController {
                 avatar_url: null
             });
 
-            // 4. Sync to public.users
-            try {
-                await pool.query(`
-                    INSERT INTO users (id, email, full_name, phone, role, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-                    ON CONFLICT (id) DO UPDATE 
-                    SET full_name = $3, phone = $4, role = $5, updated_at = NOW();
-                `, [user.id, email, full_name, phone, role]);
-            } catch (dbError) {
-                console.warn('Sync to public.users warning:', dbError.message);
-            }
 
             // 5. Delete used OTP
             await pool.query('DELETE FROM verification_codes WHERE email = $1 AND type = $2', [email, 'signup']);

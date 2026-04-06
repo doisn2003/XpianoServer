@@ -307,40 +307,44 @@ class TeacherController {
                 .select('courses!inner(teacher_id)', { count: 'exact', head: true })
                 .eq('courses.teacher_id', userId);
 
-            // Get total revenue & monthly chart data
-            const { data: enrollments } = await supabaseAdmin
-                .from('course_enrollments')
-                .select('created_at, courses!inner(teacher_id, price)')
-                .eq('courses.teacher_id', userId)
-                .eq('status', 'active');
+            // Get total revenue from snapshots
+            const { data: snapshots, error: snapError } = await supabaseAdmin
+                .from('course_revenue_snapshots')
+                .select('net_revenue, snapshot_at, enrolled_count')
+                .eq('teacher_id', userId);
+
+            if (snapError) throw snapError;
 
             let totalRevenue = 0;
             const last6Months = Array.from({ length: 6 }).map((_, i) => {
                 const d = new Date();
                 d.setMonth(d.getMonth() - i);
+                const year = d.getFullYear();
+                const month = d.getMonth() + 1;
                 return {
-                    month: `T${d.getMonth() + 1}`,
-                    yearMonth: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+                    month: `T${month}`,
+                    yearMonth: `${year}-${String(month).padStart(2, '0')}`,
                     revenue: 0,
                     students: 0
                 };
             }).reverse();
 
-            enrollments?.forEach(e => {
-                // Approximate amount paid by assuming they paid the course price
-                const amount = e.courses?.price || 0;
-                totalRevenue += amount;
+            if (snapshots) {
+                snapshots.forEach(s => {
+                    const amount = parseFloat(s.net_revenue) || 0;
+                    totalRevenue += amount;
 
-                if (e.created_at) {
-                    const created = new Date(e.created_at);
-                    const yearMonth = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, '0')}`;
-                    const m = last6Months.find(x => x.yearMonth === yearMonth);
-                    if (m) {
-                        m.revenue += amount;
-                        m.students += 1;
+                    if (s.snapshot_at) {
+                        const snapDate = new Date(s.snapshot_at);
+                        const yearMonth = `${snapDate.getFullYear()}-${String(snapDate.getMonth() + 1).padStart(2, '0')}`;
+                        const m = last6Months.find(x => x.yearMonth === yearMonth);
+                        if (m) {
+                            m.revenue += amount;
+                            m.students += (s.enrolled_count || 0);
+                        }
                     }
-                }
-            });
+                });
+            }
 
             res.status(200).json({
                 success: true,
