@@ -50,12 +50,17 @@ ClassController.getClass = async (req, res) => {
             .select(`
                 *,
                 course:courses(id, title, description, level, category, thumbnail_url, cover_url, demo_video_url, syllabus, musicxml_files, objectives),
-                schedule:course_schedules(id, name, start_date, schedule, duration_weeks)
+                schedule:course_schedules(id, name, start_date, schedule, duration_weeks),
+                teacher:profiles!teacher_id(id, full_name, avatar_url)
             `)
             .eq('id', id)
             .single();
 
-        if (fetchErr) throw fetchErr;
+        if (fetchErr) {
+            console.error('Fetch error:', fetchErr);
+            throw fetchErr;
+        }
+
 
         // Thống kê nhanh
         const [
@@ -73,19 +78,17 @@ ClassController.getClass = async (req, res) => {
             data: { ...data, stats: { totalStudents, totalSessions, completedSessions }, is_teacher: isTeacher }
         });
     } catch (e) {
-        res.status(500).json({ success: false, message: 'Lỗi lấy thông tin lớp học', error: e.message });
+        console.error('getClass error:', e);
+        res.status(500).json({ success: false, message: 'Lỗi lấy thông tin lớp học', error: e.message, details: e });
     }
 };
 
-/** GET /api/classes/:id/students — Danh sách học viên + tiến độ (teacher only) */
+/** GET /api/classes/:id/students — Danh sách học viên + tiến độ (Dành cho GV & Học viên trong lớp) */
 ClassController.getClassStudents = async (req, res) => {
     try {
         const { id } = req.params;
-        const { data: cls } = await supabaseAdmin.from('course_classes').select('teacher_id').eq('id', id).single();
-
-        if (!cls) return res.status(404).json({ success: false, message: 'Không tìm thấy lớp học' });
-        if (cls.teacher_id !== req.user.id && req.user.role !== 'admin')
-            return res.status(403).json({ success: false, message: 'Chỉ giáo viên mới có thể xem danh sách học viên' });
+        const { error: accessError, status: accessStatus } = await checkClassAccess(id, req.user.id, req.user.role);
+        if (accessError) return res.status(accessStatus).json({ success: false, message: accessError });
 
         const { data: enrollments, error } = await supabaseAdmin
             .from('course_enrollments')
