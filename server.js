@@ -122,6 +122,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/courses', require('./routes/courseRoutes'));
 app.use('/api/courses/:courseId/schedules', require('./routes/scheduleRoutes'));
+app.use('/api/schedules', require('./routes/scheduleRoutes'));
 app.use('/api/classes', require('./routes/classRoutes'));
 app.use('/api/analytics', require('./routes/courseExtRoutes'));
 app.use('/api/pianos', pianoRoutes);

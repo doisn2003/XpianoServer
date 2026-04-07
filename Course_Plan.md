@@ -42,7 +42,7 @@ duration_weeks   int4         DEFAULT 8
 sessions_per_week int4        DEFAULT 2
 max_students     int4         DEFAULT 10
 current_students int4         DEFAULT 0
-start_date       date         -- SẼ X�oá, chuyển sang course_schedules
+start_date       date         -- SẼ Xoá, chuyển sang course_schedules
 end_date         date         -- SẼ XÓA
 is_online        boolean      -- SẼ XÓA, chuyển sang course_schedules
 location         varchar      -- SẼ XÓA

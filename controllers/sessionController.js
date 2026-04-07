@@ -93,9 +93,9 @@ SessionController.getSessions = async (req, res) => {
         if (status) query = query.eq('status', status);
         if (teacher_id) query = query.eq('teacher_id', teacher_id);
 
-        // Handle "my_schedule" filter for students
+        // Handle "my_schedule" filter for all users
         if (my_schedule === 'true' && req.user) {
-            // Get all active course IDs for this student
+            // Get all active course IDs for this user as a student
             const { data: enrollments, error: enrollErr } = await supabaseAdmin
                 .from('course_enrollments')
                 .select('course_id')
@@ -104,14 +104,15 @@ SessionController.getSessions = async (req, res) => {
 
             if (enrollErr) throw enrollErr;
 
-            const enrolledCourseIds = enrollments ? enrollments.map(e => e.course_id) : [];
+            const enrolledCourseIds = enrollments ? enrollments.map(e => e.course_id).filter(id => id) : [];
 
+            // OR Condition: Either I am the teacher OR I am enrolled in the course
+            let orCondition = `teacher_id.eq.${req.user.id}`;
             if (enrolledCourseIds.length > 0) {
-                query = query.in('course_id', enrolledCourseIds);
-            } else {
-                // User has no active courses, return empty result immediately
-                return res.json({ success: true, data: [], hasMore: false });
+                orCondition += `,course_id.in.(${enrolledCourseIds.join(',')})`;
             }
+
+            query = query.or(orCondition);
         }
 
         if (cursor) query = query.gt('scheduled_at', cursor);
