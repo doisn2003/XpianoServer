@@ -1,39 +1,20 @@
-const nodemailer = require('nodemailer');
-require('dotenv').config();
-
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
-
-// Verify transporter connection
-transporter.verify(function (error, success) {
-    if (error) {
-        console.error('Email Service Error:', error);
-    } else {
-        console.log('Email Service is ready to take messages');
-    }
-});
+/**
+ * Mock Email Service
+ * Previously used Nodemailer with Gmail.
+ * User requested removal of email verification/sending.
+ */
 
 const sendEmail = async (to, subject, html) => {
-    try {
-        const info = await transporter.sendMail({
-            from: `"Xpiano Support" <${process.env.EMAIL_USER}>`,
-            to,
-            subject,
-            html
-        });
-        console.log('✅ Email sent successfully!');
-        console.log('   - To:', to);
-        console.log('   - Message ID:', info.messageId);
-        return { success: true, messageId: info.messageId };
-    } catch (error) {
-        console.error('Error sending email:', error);
-        return { success: false, error: error.message };
-    }
+    // In development, we just log to console
+    console.log('-----------------------------------------');
+    console.log('📧 MOCK EMAIL SENT');
+    console.log('To:', to);
+    console.log('Subject:', subject);
+    console.log('Content: (Check logs etc.)');
+    console.log('-----------------------------------------');
+    
+    // Always return success so the flow continues without real email
+    return { success: true, messageId: 'mock-id-' + Date.now() };
 };
 
 module.exports = sendEmail;

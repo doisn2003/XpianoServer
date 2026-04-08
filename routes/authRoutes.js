@@ -6,8 +6,7 @@ const { authenticate } = require('../middlewares/authMiddleware');
 const { authLimiter } = require('../middlewares/rateLimiter');
 
 // Public routes
-// Public routes
-router.post('/register', authLimiter, AuthController.register); // Deprecated but kept?
+router.post('/register', authLimiter, AuthController.register);
 router.post('/login', authLimiter, AuthController.login);
 router.post('/send-otp', authLimiter, AuthController.sendOtp);
 router.post('/register-verify', authLimiter, AuthController.registerWithOtp);

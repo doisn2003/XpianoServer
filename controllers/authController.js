@@ -1,6 +1,5 @@
 const { supabase, getSupabaseClient, supabaseAdmin } = require('../utils/supabaseClient');
 const UserModel = require('../models/userModel');
-const sendEmail = require('../utils/emailService');
 const pool = require('../config/database');
 
 class AuthController {
@@ -34,26 +33,14 @@ class AuthController {
             `;
             await pool.query(query, [email, otpCode, type, expiresAt]);
 
-            // 4. Send Email via Custom Service
-            const subject = type === 'signup' ? 'Mã xác thực đăng ký Xpiano' : 'Mã xác thực đổi mật khẩu Xpiano';
-            const html = `
-                <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-                    <h2 style="color: #F0C058;">${subject}</h2>
-                    <p>Mã xác thực của bạn là:</p>
-                    <h1 style="font-size: 32px; letter-spacing: 5px;">${otpCode}</h1>
-                    <p>Mã này có hiệu lực trong 5 phút.</p>
-                    <p>Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email này.</p>
-                </div>
-            `;
-
-            const emailResult = await sendEmail(email, subject, html);
-            if (!emailResult.success) {
-                throw new Error('Gửi email thất bại: ' + emailResult.error);
-            }
+            // 4. (Email sending removed as requested)
+            console.log(`🔑 [OTP Generated] Email: ${email} - Code: ${otpCode}`);
 
             res.status(200).json({
                 success: true,
-                message: `Mã xác thực đã được gửi đến ${email}`
+                message: `Mã xác thực đã được tạo (OTP flow preserved)`,
+                // Return OTP in response since we are not sending it via email
+                otp: otpCode 
             });
 
         } catch (error) {
@@ -258,16 +245,36 @@ class AuthController {
 
     // POST /api/auth/register (Original - kept for compatibility if needed, but we encourage OTP flow)
     static async register(req, res) {
-        // ... (Deprecated or redirect to OTP flow?) 
-        // For now, let's keep it but maybe we don't need it if Frontend switches fully.
-        // Let's leave the original code for now or comment it out? 
-        // User asked to "Upgrade", effectively replacing. 
-        // I'll leave the original method but update the endpoints in routes.
-        // Actually, let's just keep the file clean. I will keep this method but recommend using registerWithOtp.
-        return res.status(400).json({
-            success: false,
-            message: 'Vui lòng sử dụng tính năng đăng ký với mã xác thực (OTP)'
-        });
+        try {
+            const { email, password, full_name, phone, role } = req.body;
+            
+            // Simple direct registration bypassing OTP if user calls this endpoint
+            const { data, error: createError } = await supabaseAdmin.auth.admin.createUser({
+                email,
+                password,
+                email_confirm: true,
+                user_metadata: { full_name, phone, role: role || 'user' }
+            });
+
+            if (createError) throw createError;
+
+            // Sync to profiles
+            await supabaseAdmin.from('profiles').upsert({
+                id: data.user.id,
+                full_name,
+                phone,
+                role: role || 'user',
+                email
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Đăng ký thành công (bypass OTP)',
+                data: { user: data.user }
+            });
+        } catch (error) {
+            res.status(500).json({ success: false, message: error.message });
+        }
     }
 
     // POST /api/auth/login (Login with Password)
