@@ -712,7 +712,9 @@ class AuthController {
                 data: {
                     user: { ...loginData.user, role },
                     session: loginData.session,
-                    token: loginData.session.access_token
+                    token: loginData.session.access_token,
+                    refresh_token: loginData.session.refresh_token,
+                    expires_at: loginData.session.expires_at
                 }
             });
 
